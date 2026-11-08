@@ -1,0 +1,18 @@
+[build-system]
+requires = ["setuptools>=61"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "bcagent"
+version = "1.0.0"
+description = "Bellevue College Agent - a Claude Code style CLI that writes Python code with a tiny local LLM"
+readme = "README.md"
+requires-python = ">=3.9"
+authors = [{ name = "Pedro Albuquerque" }]
+dependencies = ["rich>=13.0", "prompt_toolkit>=3.0.36"]
+
+[project.scripts]
+bcagent = "bcagent.cli:main"
+
+[tool.setuptools]
+packages = ["bcagent"]
