@@ -4,7 +4,8 @@
 #   powershell -ExecutionPolicy Bypass -File install.ps1            # full install
 #   powershell -ExecutionPolicy Bypass -File install.ps1 -NoModel   # skip model download
 #   powershell -ExecutionPolicy Bypass -File install.ps1 -Uninstall
-param([switch]$NoModel, [switch]$Uninstall)
+#   powershell -ExecutionPolicy Bypass -File install.ps1 -UninstallAll   (removes EVERYTHING incl. Ollama; -Yes skips the question)
+param([switch]$NoModel, [switch]$Uninstall, [switch]$UninstallAll, [switch]$Yes)
 
 $ErrorActionPreference = "Stop"
 $ProgressPreference = "SilentlyContinue"   # makes Invoke-WebRequest much faster
@@ -25,24 +26,71 @@ function Die($m)  { Write-Host "  x $m" -ForegroundColor Red; exit 1 }
 function Banner {
   $art = @'
 
-     ,-.             ,-.
-    ( ( `.  _____  .' ) )   bcagent
-     \ \  \/     \/  / /    installer
-      `.\  _     _  /,'
-        | (o)   (o) |
-        |    ___    |    BELLEVUE
-       /|   (___)   |\   COLLEGE
-      | \ \_______/ / |
-       \ '.\/\/\/\/.' /
-        '.__/~~~\__.'
+     .-"-.            .-"-.
+    / .-. \__________/ .-. \    bcagent
+    \ \  /            \  / /    installer
+     \_\/  .--.  .--.  \/_/
+       |   | o|  |o |   |
+       |   '--'  '--'   |       BELLEVUE
+       |     .----.     |       COLLEGE
+      /|    ( (__) )    |\
+     | |  .--'----'--.  | |
+     | | (  \/\/\/\/  ) | |
+      \ \ '-.______.-' / /
+       '-.____________.-'
 
 '@
-  Write-Host $art -ForegroundColor DarkBlue -BackgroundColor White
+  Write-Host $art -ForegroundColor Blue
 }
 
 function Refresh-Path {
   $env:Path = [Environment]::GetEnvironmentVariable("Path", "Machine") + ";" +
               [Environment]::GetEnvironmentVariable("Path", "User")
+}
+
+if ($UninstallAll) {
+  Write-Host "This removes EVERYTHING bcagent installed:" -ForegroundColor Blue
+  Write-Host "  - the bcagent command and its Python environment" -ForegroundColor Blue
+  Write-Host "  - your bcagent settings, agents, MCP servers and history ($BcHome)" -ForegroundColor Blue
+  Write-Host "  - the bcagent models and Ollama itself, including ALL Ollama models" -ForegroundColor Blue
+  Write-Host "Python is left installed (other programs may need it)." -ForegroundColor Blue
+  if (-not $Yes) {
+    $ans = Read-Host "Continue? [y/N]"
+    if ($ans -notmatch '^(y|yes)$') { Say "Cancelled - nothing was removed"; exit 0 }
+  }
+  Say "Removing bcagent"
+  $userPath = [Environment]::GetEnvironmentVariable("Path", "User")
+  $newPath = ($userPath -split ";" | Where-Object { $_ -and $_ -ne $BinDir }) -join ";"
+  [Environment]::SetEnvironmentVariable("Path", $newPath, "User")
+  Remove-Item -Recurse -Force $BcHome -ErrorAction SilentlyContinue
+  Ok "bcagent, settings, agents and MCP servers removed"
+
+  $ollama = Get-Command ollama -ErrorAction SilentlyContinue
+  $ollamaExe = if ($ollama) { $ollama.Source } else { Join-Path $env:LOCALAPPDATA "Programs\Ollama\ollama.exe" }
+  if (Test-Path $ollamaExe) {
+    Say "Removing bcagent models"
+    foreach ($m in @($Model, "qwen2.5-coder:0.5b", "qwen2.5-coder:1.5b", "qwen2.5-coder:3b", "qwen2.5-coder:7b") | Select-Object -Unique) {
+      & $ollamaExe rm $m 2>$null | Out-Null
+      if ($LASTEXITCODE -eq 0) { Ok "removed model $m" }
+    }
+  }
+  Say "Removing Ollama"
+  Get-Process "ollama*", "Ollama*" -ErrorAction SilentlyContinue | Stop-Process -Force -ErrorAction SilentlyContinue
+  $removed = $false
+  if (Get-Command winget -ErrorAction SilentlyContinue) {
+    winget uninstall --id Ollama.Ollama -e --silent 2>$null | Out-Null
+    if ($LASTEXITCODE -eq 0) { $removed = $true }
+  }
+  $unins = Join-Path $env:LOCALAPPDATA "Programs\Ollama\unins000.exe"
+  if (-not $removed -and (Test-Path $unins)) {
+    Start-Process $unins -ArgumentList "/VERYSILENT", "/SUPPRESSMSGBOXES", "/NORESTART" -Wait
+  }
+  Remove-Item -Recurse -Force (Join-Path $env:USERPROFILE ".ollama") -ErrorAction SilentlyContinue
+  Remove-Item -Recurse -Force (Join-Path $env:LOCALAPPDATA "Ollama") -ErrorAction SilentlyContinue
+  Remove-Item -Recurse -Force (Join-Path $env:LOCALAPPDATA "Programs\Ollama") -ErrorAction SilentlyContinue
+  Ok "Ollama and all models removed"
+  Ok "bcagent is completely uninstalled. Go Bulldogs!"
+  exit 0
 }
 
 if ($Uninstall) {

@@ -35,17 +35,18 @@ console = Console(theme=THEME, highlight=False)
 err_console = Console(theme=THEME, highlight=False, stderr=True)
 
 BULLDOG = r"""
-   ,-.             ,-.
-  ( ( `.  _____  .' ) )
-   \ \  \/     \/  / /
-    `.\  _     _  /,'
-      | (o)   (o) |
-      |    ___    |
-     /|   (___)   |\
-    | \ \_______/ / |
-     \ '.\/\/\/\/.' /
-      '.__/~~~\__.'
-     [=o==o==o==o==o=]
+   .-"-.            .-"-.
+  / .-. \__________/ .-. \
+  \ \  /            \  / /
+   \_\/  .--.  .--.  \/_/
+     |   | o|  |o |   |
+     |   '--'  '--'   |
+     |     .----.     |
+    /|    ( (__) )    |\
+   | |  .--'----'--.  | |
+   | | (  \/\/\/\/  ) | |
+    \ \ '-.______.-' / /
+     '-.____________.-'
 """
 
 TIPS = [
@@ -58,10 +59,12 @@ TIPS = [
 
 
 def bulldog_badge() -> Panel:
-    art = Text(BULLDOG.strip("\n"), style=f"bold {BC_BLUE} on {BC_WHITE}")
+    """The Bulldog logo, drawn entirely in Bellevue College blue."""
+    art = Text(BULLDOG.strip("\n"), style=f"bold {BC_BLUE_LIGHT}")
     art.append("\n\n")
-    art.append("   BELLEVUE COLLEGE   ", style=f"bold {BC_WHITE} on {BC_BLUE}")
-    return Panel(art, style=f"on {BC_WHITE}", border_style=BC_BLUE, padding=(0, 1), expand=False)
+    width = max(len(line) for line in BULLDOG.strip("\n").splitlines())
+    art.append("BELLEVUE COLLEGE".center(width), style=f"bold {BC_BLUE_LIGHT}")
+    return Panel(art, border_style=BC_BLUE_LIGHT, padding=(0, 1), expand=False)
 
 
 def shorten(path: Path) -> str:

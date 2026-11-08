@@ -74,6 +74,42 @@ class Project:
                     return out
         return out
 
+    def dirs(self, limit: int = 200) -> List[str]:
+        """Project folders (relative, with a trailing slash) for @-completion."""
+        seen: List[str] = []
+        for f in self.files(limit=2000):
+            parts = f.split("/")[:-1]
+            for i in range(1, len(parts) + 1):
+                d = "/".join(parts[:i]) + "/"
+                if d not in seen:
+                    seen.append(d)
+                    if len(seen) >= limit:
+                        return seen
+        return seen
+
+    def complete(self, frag: str, limit: int = 40) -> List[str]:
+        """Claude-Code-style @ completion: folders and files, best matches first."""
+        frag = frag.lower().lstrip("./")
+        scored = []
+        for path in self.dirs() + self.files(limit=2000):
+            low = path.lower()
+            name = low.rstrip("/").rsplit("/", 1)[-1]
+            if not frag:
+                rank = (low.count("/") - low.endswith("/"), 0)
+            elif low.startswith(frag):
+                rank = (0, len(low))
+            elif name.startswith(frag):
+                rank = (1, len(low))
+            elif frag in name:
+                rank = (2, len(low))
+            elif frag in low:
+                rank = (3, len(low))
+            else:
+                continue
+            scored.append((rank, path))
+        scored.sort()
+        return [p for _, p in scored[:limit]]
+
     def read(self, rel: str, max_chars: int = 0) -> str:
         text = self.resolve(rel).read_text(encoding="utf-8", errors="replace")
         if max_chars and len(text) > max_chars:
@@ -92,7 +128,7 @@ class Project:
     def mentioned(self, prompt: str) -> List[str]:
         """@path mentions (files or folders)."""
         out: List[str] = []
-        for m in re.findall(r"@([\w./\\-]+)", prompt):
+        for m in re.findall(r"(?:^|(?<=\s))@([\w./\\~+-]+)", prompt):
             m = m.rstrip(".,;:")
             try:
                 p = self.resolve(m)

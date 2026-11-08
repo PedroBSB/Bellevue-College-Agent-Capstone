@@ -1,6 +1,7 @@
 """The agent loop: prompt -> local model -> proposed edits -> approval -> apply -> self-check -> repair."""
 from __future__ import annotations
 
+import json
 import os
 import random
 import shutil
@@ -10,12 +11,14 @@ from typing import List, Optional, Tuple
 
 from rich.live import Live
 from rich.markdown import Markdown
+from rich.markup import escape
 from rich.text import Text
 
 from . import ui
 from .agents import Agent
 from .edits import Edit, check_python, parse_response, valid_path, write_edit
 from .llm import Ollama
+from .mcp import MCPError, MCPManager, parse_tool_calls
 from .project import Project
 from .ui import console
 
@@ -35,6 +38,21 @@ class Session:
         self.history: List[dict] = []
         self.notes: List[str] = []      # e.g. output of "!cmd" to share with the model
         self.undo_stack: List[List[Tuple[str, Optional[str]]]] = []
+        self.mcp = MCPManager(project.root)
+        self.trusted_tools: set = set()  # MCP tools the user allowed for the whole session
+
+    def start_mcp(self) -> None:
+        """Connect to the configured MCP servers (first turn only)."""
+        if self.mcp.started or not self.mcp.servers():
+            return
+        if self.print_mode:
+            self.mcp.start()
+        else:
+            with console.status("[bc]Connecting MCP servers…[/]", spinner="dots",
+                                spinner_style=ui.BC_BLUE_LIGHT) as st:
+                self.mcp.start(lambda n: st.update(f"[bc]Connecting MCP server {n}…[/]"))
+        for name, err in self.mcp.errors.items():
+            ui.err_console.print(f"  [warn]⚠ MCP server {name} failed:[/] {err}")
 
     # -- prompt building ------------------------------------------------------
     def budget_chars(self) -> int:
@@ -53,7 +71,10 @@ class Session:
     def build_messages(self, prompt: str) -> List[dict]:
         hist = self.trimmed_history()
         used = sum(len(m["content"]) for m in hist)
-        ctx, _ = self.project.context(prompt, self.budget_chars() - used)
+        ctx, included = self.project.context(prompt, self.budget_chars() - used)
+        if included and not self.print_mode:
+            for f in included:
+                console.print(f"  [muted]⎿  Read[/] [bc]{f}[/]")
         notes = ""
         if self.notes:
             notes = "\n\n".join(self.notes) + "\n\n"
@@ -67,7 +88,11 @@ class Session:
             if self.agent.edit_format == "whole":
                 hint += "\nAnswer with `FILE: <path>` followed by the COMPLETE updated file in a code block."
         user = f"{ctx}\n\n{notes}Task: {prompt}{hint}"
-        return [{"role": "system", "content": self.agent.system_prompt()}] + hist + \
+        system = self.agent.system_prompt()
+        tools = self.mcp.prompt_section()
+        if tools:
+            system += "\n\n" + tools
+        return [{"role": "system", "content": system}] + hist + \
                [{"role": "user", "content": user}]
 
     def options(self) -> dict:
@@ -113,12 +138,19 @@ class Session:
         return text, interrupted
 
     # -- main turn ------------------------------------------------------------
-    def turn(self, prompt: str, repair: int = 0) -> None:
+    def turn(self, prompt: str, repair: int = 0, tool_rounds: int = 0) -> None:
+        self.start_mcp()
         text, interrupted = self.generate(self.build_messages(prompt))
         self.history += [{"role": "user", "content": prompt}, {"role": "assistant", "content": text}]
         if interrupted:
             console.print("  [warn]⎿  Interrupted by user[/]")
             return
+        calls = parse_tool_calls(text) if self.mcp.clients else []
+        if calls and tool_rounds < 5:
+            results = self.run_tools(calls)
+            if results:
+                return self.turn("Tool results:\n" + "\n\n".join(results) +
+                                 "\n\nContinue the original task using these results.", repair, tool_rounds + 1)
         if self.agent.edit_format == "none":
             return
         edits, commands, orphans = parse_response(text, self.project)
@@ -144,6 +176,35 @@ class Session:
                        "\nFix them. Write the COMPLETE corrected file(s) using `FILE: path` and a code block.")
                 return self.turn(fix, repair + 1)
         self.offer_commands(commands)
+
+    # -- MCP tools ------------------------------------------------------------
+    def run_tools(self, calls) -> List[str]:
+        results = []
+        for name, args in calls[:5]:
+            shown = json.dumps(args, ensure_ascii=False)
+            if not self.print_mode:
+                console.print(f"[bc]●[/] [bold]{escape(name)}[/]([muted]{escape(shown[:200])}[/])")
+            if not (self.auto or name in self.trusted_tools):
+                if self.print_mode or not ui.is_interactive():
+                    results.append(f"{name}: not run (needs approval, use --yes)")
+                    continue
+                c = ui.choose(f"Allow MCP tool {escape(name)}?",
+                              ["Yes", f"Yes, and don't ask again for {escape(name)} this session", "No"])
+                if c == 2:
+                    results.append(f"{name}: the user declined to run this tool")
+                    continue
+                if c == 1:
+                    self.trusted_tools.add(name)
+            try:
+                out = self.mcp.call(name, args)
+            except MCPError as e:
+                out = f"ERROR: {e}"
+            if not self.print_mode:
+                first = out.strip().splitlines()[:3]
+                console.print(Text("  ⎿  " + "\n     ".join(l[:110] for l in first) +
+                                   (" …" if len(out.splitlines()) > 3 else ""), style="muted"))
+            results.append(f"{name}({shown}) returned:\n{out[:4000]}")
+        return results
 
     # -- edits ----------------------------------------------------------------
     def guess_target(self, prompt: str) -> Optional[str]:

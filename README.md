@@ -1,17 +1,18 @@
 # bcagent — Bellevue College Agent (Capstone)
 
 ```
-   ,-.             ,-.
-  ( ( `.  _____  .' ) )      bcagent
-   \ \  \/     \/  / /       Bellevue College Agent
-    `.\  _     _  /,'        a Claude Code style CLI that writes
-      | (o)   (o) |          Python code with a tiny LOCAL LLM
-      |    ___    |
-     /|   (___)   |\
-    | \ \_______/ / |
-     \ '.\/\/\/\/.' /
-      '.__/~~~\__.'
-     [=o==o==o==o==o=]
+   .-"-.            .-"-.
+  / .-. \__________/ .-. \    bcagent
+  \ \  /            \  / /    Bellevue College Agent
+   \_\/  .--.  .--.  \/_/     a Claude Code style CLI that writes
+     |   | o|  |o |   |       Python code with a tiny LOCAL LLM
+     |   '--'  '--'   |
+     |     .----.     |
+    /|    ( (__) )    |\
+   | |  .--'----'--.  | |
+   | | (  \/\/\/\/  ) | |
+    \ \ '-.______.-' / /
+     '-.____________.-'
 ```
 
 `bcagent` is a terminal coding agent modeled on Claude Code. You type a prompt, it reads your
@@ -59,7 +60,18 @@ What the installer does:
 | Default model | `ollama pull qwen2.5-coder:0.5b` | same | same |
 
 Options: `--no-model` / `-NoModel` skips the model download (it then downloads on first run).
-`--uninstall` / `-Uninstall`, or `uninstall.sh` / `uninstall.bat`, removes bcagent.
+`--uninstall` / `-Uninstall`, or `uninstall.sh` / `uninstall.bat`, removes bcagent (keeps settings, Ollama and models).
+
+To remove **everything** (bcagent, settings, agents, MCP servers, the models and Ollama), use the
+uninstall-all option. It asks for confirmation first; add `--yes` / `-Yes` to skip the question.
+Python is left installed.
+
+```bash
+./uninstall.sh --all          # or: ./install.sh --uninstall-all
+```
+```bat
+uninstall.bat --all           & rem or: install.ps1 -UninstallAll
+```
 
 ## Use
 
@@ -70,8 +82,12 @@ bcagent "create a todo list app in todo.py"   # start the session with a prompt
 bcagent -p "write fizzbuzz in fizz.py" --yes  # one-shot / scripting mode, like `claude -p`
 bcagent -a tester "write tests for @calc.py"  # use a specific agent
 bcagent -m qwen2.5-coder:1.5b                 # use any Ollama model for this run
+bcagent mcp add fetch                         # add a public MCP server (see below)
 bcagent doctor                                # check the installation
 ```
+
+bcagent works on the folder you start it in (or `-C <folder>`): it can read every file there, and it
+creates and changes files inside that folder after you approve the diff. It never writes outside it.
 
 Each request goes through these steps:
 
@@ -88,11 +104,12 @@ Each request goes through these steps:
 
 | Input | Action |
 |-------|--------|
-| `@file.py` / `@folder` | add a file or folder to the context (tab completes) |
+| `@file.py` / `@folder/` | tag a file or folder: its content is sent to the agent (`@` + tab completes, like Claude Code) |
 | `!command` | run a shell command; its output goes to the agent with your next prompt |
 | `shift+tab` | toggle auto-accept edits |
 | `esc` then `enter` | new line |
-| `ctrl+c` | interrupt generation |
+| `quit`, `exit`, `ctrl+c`, `ctrl+d` | leave bcagent |
+| `ctrl+c` while it is answering | stop the current answer |
 | `/help` | all commands |
 | `/agents`, `/agents catalog` | list installed / installable agents |
 | `/agent <name>` | switch agent |
@@ -100,6 +117,7 @@ Each request goes through these steps:
 | `/model <ollama-tag>` | change the model for this session |
 | `/add`, `/drop`, `/files` | pin files in context |
 | `/init` | create `BCAGENT.md` project notes (like `CLAUDE.md`) |
+| `/mcp`, `/mcp catalog`, `/mcp add <name>`, `/mcp tools` | MCP servers |
 | `/undo` | undo the last edits |
 | `/clear`, `/status`, `/doctor`, `/exit` | |
 
@@ -138,6 +156,29 @@ temperature: 0.2
 You build Flask web apps. Always include a requirements.txt and a templates/ folder.
 ```
 
+## MCP servers
+
+bcagent can install public [Model Context Protocol](https://modelcontextprotocol.io) servers and lets the
+agent call their tools (each call asks for your approval unless auto-accept is on). The config file uses
+the same `mcpServers` format as Claude Code / Claude Desktop.
+
+```bash
+bcagent mcp catalog                         # public servers: filesystem, fetch, git, time, memory, ...
+bcagent mcp add fetch                       # from the catalog
+bcagent mcp add @modelcontextprotocol/server-memory    # any npm package (runs with npx)
+bcagent mcp add pypi:mcp-server-time        # any PyPI package (runs with uvx)
+bcagent mcp add weather -e API_KEY=123 -- python weather_server.py   # any command
+bcagent mcp add git --project               # save in ./.mcp.json to share with the repo
+bcagent mcp list                            # configured servers
+bcagent mcp tools                           # start them and list their tools
+bcagent mcp remove fetch
+```
+
+User servers live in `~/.bcagent/mcp.json`, project servers in `./.mcp.json`. Only stdio servers are
+supported. npm servers need Node.js and PyPI servers need [uv](https://docs.astral.sh/uv/).
+Small models such as the default 0.5B one rarely use tools well; a larger agent like `bulldog-3b`
+works better with MCP.
+
 ## Project layout
 
 ```
@@ -146,11 +187,12 @@ bcagent/
 ├── uninstall.sh / uninstall.bat
 ├── pyproject.toml
 └── bcagent/
-    ├── cli.py        argument parsing, REPL, slash commands, `agents` and `doctor` subcommands
+    ├── cli.py        argument parsing, REPL, slash commands, `agents`, `mcp` and `doctor` subcommands
     ├── session.py    the agent loop: prompt → model → edits → approval → check → repair
     ├── edits.py      parses the model's answer into file edits and shell commands
     ├── project.py    file tree, BCAGENT.md memory, choosing relevant files for context
     ├── agents.py     built-in agent, catalog, installing custom agents
+    ├── mcp.py        MCP client, public server catalog, ~/.bcagent/mcp.json
     ├── llm.py        Ollama client (Python standard library only, streaming)
     ├── ui.py         Bellevue College Blue theme, Bulldog banner, diffs, menus
     └── config.py     ~/.bcagent/config.json

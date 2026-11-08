@@ -4,7 +4,9 @@
 #
 #   ./install.sh                 # full install
 #   ./install.sh --no-model      # skip downloading the model (downloads on first run instead)
-#   ./install.sh --uninstall     # remove bcagent (keeps Ollama and Python)
+#   ./install.sh --uninstall     # remove bcagent (keeps settings, Ollama and Python)
+#   ./install.sh --uninstall-all # remove EVERYTHING: bcagent, settings/agents/MCP servers, models and Ollama
+#                                #   (add --yes to skip the confirmation question)
 #
 # Environment overrides: BCAGENT_HOME (default ~/.bcagent), BCAGENT_MODEL (default qwen2.5-coder:0.5b)
 set -euo pipefail
@@ -15,6 +17,7 @@ MODEL="${BCAGENT_MODEL:-qwen2.5-coder:0.5b}"
 BIN_DIR="$HOME/.local/bin"
 PY_MIN_MINOR=9
 SKIP_MODEL=0
+ASSUME_YES=0
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]:-$0}")" 2>/dev/null && pwd || pwd)"
 
 BLUE=$'\033[1;38;2;79;143;219m'; BCB=$'\033[1;38;2;0;61;121;48;2;255;255;255m'
@@ -29,19 +32,21 @@ SUDO=""
 if [ "$(id -u)" -ne 0 ] && command -v sudo >/dev/null 2>&1; then SUDO="sudo"; fi
 
 banner() {
-  printf '%s' "$BCB"
+  printf "%s" "$BLUE"
   cat <<'EOF'
 
-     ,-.             ,-.
-    ( ( `.  _____  .' ) )   bcagent
-     \ \  \/     \/  / /    installer
-      `.\  _     _  /,'
-        | (o)   (o) |
-        |    ___    |    BELLEVUE
-       /|   (___)   |\   COLLEGE
-      | \ \_______/ / |
-       \ '.\/\/\/\/.' /
-        '.__/~~~\__.'
+     .-"-.            .-"-.
+    / .-. \__________/ .-. \    bcagent
+    \ \  /            \  / /    installer
+     \_\/  .--.  .--.  \/_/
+       |   | o|  |o |   |
+       |   '--'  '--'   |       BELLEVUE
+       |     .----.     |       COLLEGE
+      /|    ( (__) )    |\
+     | |  .--'----'--.  | |
+     | | (  \/\/\/\/  ) | |
+      \ \ '-.______.-' / /
+       '-.____________.-'
 
 EOF
   printf '%s\n' "$R"
@@ -56,11 +61,79 @@ uninstall() {
   exit 0
 }
 
+uninstall_all() {
+  printf '%s' "$BLUE"
+  cat <<'MSG'
+This removes EVERYTHING bcagent installed:
+  - the bcagent command and its Python environment
+  - your bcagent settings, agents, MCP servers and history (~/.bcagent)
+  - the bcagent models and Ollama itself, including ALL Ollama models (~/.ollama)
+Python is left installed (other programs may need it).
+MSG
+  printf '%s' "$R"
+  if [ "$ASSUME_YES" -ne 1 ]; then
+    printf 'Continue? [y/N] '
+    { read -r ans </dev/tty; } 2>/dev/null || ans=""
+    case "$ans" in y|Y|yes|YES) ;; *) say "Cancelled – nothing was removed"; exit 0 ;; esac
+  fi
+  local sudo=""
+  if [ "$(id -u)" -ne 0 ] && command -v sudo >/dev/null 2>&1; then sudo="sudo"; fi
+
+  say "Removing bcagent"
+  rm -f "$BIN_DIR/bcagent"
+  rm -rf "$BCAGENT_HOME"
+  ok "bcagent, settings, agents and MCP servers removed"
+
+  local ob=""
+  for c in ollama /usr/local/bin/ollama /opt/homebrew/bin/ollama /Applications/Ollama.app/Contents/Resources/ollama; do
+    if command -v "$c" >/dev/null 2>&1; then ob="$(command -v "$c")"; break; fi
+  done
+  if [ -n "$ob" ]; then
+    say "Removing bcagent models"
+    for m in "$MODEL" qwen2.5-coder:0.5b qwen2.5-coder:1.5b qwen2.5-coder:3b qwen2.5-coder:7b; do
+      "$ob" rm "$m" >/dev/null 2>&1 && ok "removed model $m" || true
+    done
+  fi
+
+  say "Removing Ollama"
+  if [ "$(uname -s)" = "Darwin" ]; then
+    osascript -e 'quit app "Ollama"' >/dev/null 2>&1 || true
+    if command -v brew >/dev/null 2>&1 && brew list ollama >/dev/null 2>&1; then
+      brew services stop ollama >/dev/null 2>&1 || true
+      brew uninstall ollama >/dev/null 2>&1 || true
+    fi
+    pkill -f "ollama serve" >/dev/null 2>&1 || true
+    rm -rf /Applications/Ollama.app "$HOME/Library/Application Support/Ollama" \
+           "$HOME/Library/Saved Application State/com.electron.ollama.savedState" 2>/dev/null || true
+    if [ -e /usr/local/bin/ollama ] || [ -L /usr/local/bin/ollama ]; then $sudo rm -f /usr/local/bin/ollama || true; fi
+  else
+    if command -v systemctl >/dev/null 2>&1; then
+      $sudo systemctl stop ollama >/dev/null 2>&1 || true
+      $sudo systemctl disable ollama >/dev/null 2>&1 || true
+      $sudo rm -f /etc/systemd/system/ollama.service || true
+    fi
+    pkill -f "ollama serve" >/dev/null 2>&1 || true
+    if [ -n "$ob" ]; then $sudo rm -f "$ob" || true; fi
+    $sudo rm -rf /usr/share/ollama /usr/local/lib/ollama 2>/dev/null || true
+    $sudo userdel ollama >/dev/null 2>&1 || true
+    $sudo groupdel ollama >/dev/null 2>&1 || true
+  fi
+  rm -rf "$HOME/.ollama"
+  ok "Ollama and all models removed"
+  ok "bcagent is completely uninstalled. Go Bulldogs! 🐾"
+  exit 0
+}
+
+for arg in "$@"; do
+  case "$arg" in -y|--yes) ASSUME_YES=1 ;; esac
+done
 for arg in "$@"; do
   case "$arg" in
     --no-model) SKIP_MODEL=1 ;;
+    -y|--yes) ;;
     --uninstall) uninstall ;;
-    -h|--help) sed -n '2,10p' "$0"; exit 0 ;;
+    --uninstall-all|--all) uninstall_all ;;
+    -h|--help) sed -n '2,12p' "$0"; exit 0 ;;
     *) die "unknown option $arg" ;;
   esac
 done
