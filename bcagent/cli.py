@@ -11,7 +11,7 @@ from typing import List, Optional
 from rich.progress import BarColumn, DownloadColumn, Progress, TextColumn, TransferSpeedColumn
 from rich.table import Table
 
-from . import __version__, agents as agents_mod, mcp as mcp_mod, ui
+from . import __version__, agents as agents_mod, mcp as mcp_mod, ui, update as update_mod
 from .agents import CATALOG, Agent, all_agents
 from .config import AGENTS_DIR, CONFIG_FILE, HISTORY_FILE, load_config, save_config
 from .llm import Ollama, OllamaError
@@ -36,6 +36,7 @@ COMMANDS = [
     ("/clear", "Clear conversation history"),
     ("/status", "Show agent, model and Ollama status"),
     ("/doctor", "Check your installation"),
+    ("/update", "Check for a new bcagent version and install it"),
     ("/exit", "Exit bcagent"),
 ]
 
@@ -105,6 +106,13 @@ def doctor(client: Ollama, cfg: dict) -> None:
             except OllamaError:
                 pass
         t.add_row("agent", f"{agent.name} → {agent.model} " + (ok if have else f"{bad} model not downloaded"))
+    latest = update_mod.latest_version(force=True)
+    if latest and update_mod.newer(latest):
+        t.add_row("updates", f"[warn]⬆ v{latest} available[/] – run [bc]bcagent update[/]")
+    elif latest:
+        t.add_row("updates", f"{ok} up to date")
+    else:
+        t.add_row("updates", "[muted]could not check (offline?)[/]")
     t.add_row("config", str(CONFIG_FILE))
     t.add_row("agents dir", str(AGENTS_DIR))
     console.print(t)
@@ -472,6 +480,11 @@ def handle_slash(line: str, session: Session, client: Ollama, cfg: dict) -> bool
         else:
             console.print("usage: [bc]/mcp[/] [list | catalog | add <name|@npm/pkg|pypi:pkg> [KEY=VALUE] "
                           "[--project] | remove <name> | tools [server]]")
+    elif cmd == "/update":
+        if update_mod.update_command() == update_mod.UPDATED:
+            console.print("[muted]Restarting bcagent…[/]")
+            session.mcp.close()
+            update_mod.restart(["-C", str(proj.root), "-a", session.agent.name])
     elif cmd == "/run":
         session.run_file(arg)
     elif cmd == "/undo":
@@ -543,13 +556,16 @@ def main(argv: Optional[List[str]] = None) -> None:
     if argv and argv[0] == "doctor":
         doctor(client, cfg)
         return
+    if argv and argv[0] == "update":
+        code = update_mod.update_command()
+        sys.exit(0 if code == update_mod.UPDATED else code)
 
     p = argparse.ArgumentParser(
         prog="bcagent",
         description="bcagent – Bellevue College Agent: a local AI coding CLI (like Claude Code) "
                     "powered by the smallest, fastest local code LLM.",
         epilog="Other commands: `bcagent agents [list|catalog|install|remove|use|create]`, "
-               "`bcagent mcp [list|catalog|add|remove|tools]`, `bcagent doctor`")
+               "`bcagent mcp [list|catalog|add|remove|tools]`, `bcagent doctor`, `bcagent update`")
     p.add_argument("prompt", nargs="*", help="initial prompt")
     p.add_argument("-p", "--print", action="store_true", dest="print_mode",
                    help="non-interactive: answer the prompt, print the result and exit")
@@ -582,6 +598,7 @@ def main(argv: Optional[List[str]] = None) -> None:
         console.print("[err]✗ -p needs a prompt[/]")
         sys.exit(2)
 
+    update_mod.maybe_update(cfg, argv, interactive=not a.print_mode and ui.is_interactive())
     if not ensure_model(client, agent.model):
         sys.exit(1)
     session = Session(project, agent, cfg, client, auto=a.yes, print_mode=a.print_mode)

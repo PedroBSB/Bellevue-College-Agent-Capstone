@@ -20,6 +20,7 @@ DEFAULTS = {
     "max_tokens": 4096,      # max tokens generated per answer
     "max_repairs": 2,        # automatic self-fix attempts after syntax errors
     "agents": {},            # installed agents {name: {...}}
+    "auto_update": True,     # look for new bcagent versions at start-up and update automatically
 }
 
 

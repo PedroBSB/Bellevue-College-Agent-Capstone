@@ -86,6 +86,15 @@ Python is left installed.
 uninstall.bat --all           & rem or: install.ps1 -UninstallAll
 ```
 
+## Updates
+
+bcagent keeps itself up to date. When it starts, it compares its version with the one on GitHub. It
+checks at most every 6 hours, and a check takes at most 3 seconds, so being offline doesn't slow it
+down. If a newer version exists, bcagent upgrades itself and restarts with the same arguments. Run
+`bcagent update` (or `/update` in a session) to check right away. To turn automatic updates off, set
+`"auto_update": false` in `~/.bcagent/config.json` or set `BCAGENT_NO_UPDATE=1`. If bcagent wasn't
+installed with the bcagent installer, it only tells you that a new version is available.
+
 ## Use
 
 ```bash
@@ -97,6 +106,7 @@ bcagent -a tester "write tests for @calc.py"  # use a specific agent
 bcagent -m qwen2.5-coder:1.5b                 # use any Ollama model for this run
 bcagent mcp add fetch                         # add a public MCP server (see below)
 bcagent doctor                                # check the installation
+bcagent update                                # update bcagent now (it also updates itself)
 ```
 
 bcagent works on the folder you start it in (or `-C <folder>`): it can read every file there, and it
@@ -141,6 +151,7 @@ Each request goes through these steps:
 | `/mcp`, `/mcp catalog`, `/mcp add <name>`, `/mcp tools` | MCP servers |
 | `/run [file.py] [args]` | run a Python file (default: the last one bcagent wrote) |
 | `/undo` | undo the last edits |
+| `/update` | check for a new bcagent version, install it and restart |
 | `/clear`, `/status`, `/doctor`, `/exit` | |
 
 ## Agents
@@ -217,6 +228,7 @@ bcagent/
     ├── mcp.py        MCP client, public server catalog, ~/.bcagent/mcp.json
     ├── llm.py        Ollama client (Python standard library only, streaming)
     ├── ui.py         Bellevue College Blue theme, Bulldog banner, diffs, menus
+    ├── update.py     self-update: checks GitHub for new versions and upgrades in place
     └── config.py     ~/.bcagent/config.json
 ```
 
