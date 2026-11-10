@@ -30,6 +30,7 @@ COMMANDS = [
     ("/files", "Show files in context"),
     ("/init", f"Create {MEMORY_FILE} with notes about this project"),
     ("/mcp", "MCP servers: /mcp [list|catalog|add <name|@npm/pkg|pypi:pkg>|remove <name>|tools]"),
+    ("/run", "Run a Python file: /run [file.py] [args] (default: the last file bcagent wrote)"),
     ("/undo", "Undo the last set of file edits"),
     ("/auto", "Toggle auto-accept of edits (same as shift+tab)"),
     ("/clear", "Clear conversation history"),
@@ -48,6 +49,8 @@ HELP = """[bold]bcagent[/] – Bellevue College Agent. Type what you want and pr
 [bold]Shortcuts[/]
   [bc]@file[/]        include a file or folder in the context
   [bc]!command[/]     run a shell command (output is shared with bcagent)
+  [bc]/run[/] file.py  run a Python file (bcagent also offers to run the scripts it writes)
+  [bc]↑/↓ enter[/]    pick an option when bcagent asks; or choose [bc]Chat about this[/] to reply
   [bc]shift+tab[/]    toggle auto-accept edits
   [bc]esc enter[/]    new line
   [bc]quit[/] / [bc]exit[/]  leave bcagent (also [bc]ctrl+c[/] or [bc]ctrl+d[/] at the prompt)
@@ -469,6 +472,8 @@ def handle_slash(line: str, session: Session, client: Ollama, cfg: dict) -> bool
         else:
             console.print("usage: [bc]/mcp[/] [list | catalog | add <name|@npm/pkg|pypi:pkg> [KEY=VALUE] "
                           "[--project] | remove <name> | tools [server]]")
+    elif cmd == "/run":
+        session.run_file(arg)
     elif cmd == "/undo":
         session.undo()
     elif cmd == "/auto":

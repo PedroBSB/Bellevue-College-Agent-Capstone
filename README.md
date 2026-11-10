@@ -53,13 +53,26 @@ What the installer does:
 
 | Step | macOS | Linux | Windows |
 |------|-------|-------|---------|
-| Python 3.9+ (if missing) | Homebrew, or the official python.org `.pkg` | apt / dnf / yum / pacman / zypper / apk | winget, or the official python.org installer |
+| Python 3.9+ (if missing) | Homebrew, or the official python.org `.pkg`; **no admin:** private Python in `~/.bcagent` | apt / dnf / yum / pacman / zypper / apk; **no sudo:** private Python in `~/.bcagent` | winget, or the python.org installer (per user); **blocked:** portable Python in `%USERPROFILE%\.bcagent\python` |
 | bcagent + requirements (`rich`, `prompt_toolkit`) | venv in `~/.bcagent/venv` | venv in `~/.bcagent/venv` | venv in `%USERPROFILE%\.bcagent\venv` |
 | `bcagent` command on PATH | `~/.local/bin/bcagent` | `~/.local/bin/bcagent` | `%USERPROFILE%\.bcagent\bin\bcagent.cmd` |
-| Ollama (if missing) | Homebrew, or Ollama.app | official `ollama.com/install.sh` | winget, or `OllamaSetup.exe` |
+| Ollama (if missing) | Homebrew, or Ollama.app (`~/Applications` without admin rights) | official `ollama.com/install.sh`; **no sudo:** unpacked into `~/.bcagent/ollama` | winget, or `OllamaSetup.exe`; **blocked:** portable Ollama in `%USERPROFILE%\.bcagent\ollama` |
 | Default model | `ollama pull qwen2.5-coder:0.5b` | same | same |
 
 Options: `--no-model` / `-NoModel` skips the model download (it then downloads on first run).
+
+**No administrator rights?** (lab and school computers, accounts without `sudo`.) The installer
+checks whether it can use `sudo`. If it can't, or if a system install fails, it installs whatever is
+missing for your user only:
+
+- **Python:** a private copy in `~/.bcagent`, installed with [uv](https://docs.astral.sh/uv/) or, if
+  that fails, a prebuilt [python-build-standalone](https://github.com/astral-sh/python-build-standalone)
+  build. The same fallback is used when the system Python can't create virtual environments (for
+  example Ubuntu without `python3-venv`). On Windows the fallback is the portable NuGet Python.
+- **Ollama:** on macOS in `~/Applications/Ollama.app`, on Linux in `~/.bcagent/ollama`, linked from
+  `~/.local/bin/ollama`. On Windows a portable `ollama.exe` goes in `%USERPROFILE%\.bcagent\ollama`.
+
+To skip `sudo` even on an administrator account, run `./install.sh --user`.
 `--uninstall` / `-Uninstall`, or `uninstall.sh` / `uninstall.bat`, removes bcagent (keeps settings, Ollama and models).
 
 To remove **everything** (bcagent, settings, agents, MCP servers, the models and Ollama), use the
@@ -93,12 +106,19 @@ Each request goes through these steps:
 
 1. bcagent sends the prompt with the project's file tree, `BCAGENT.md` notes, and the relevant files.
 2. The local model streams its answer to the terminal.
-3. bcagent turns the answer into file edits and shows them as a colored diff. You choose
-   **1. Yes / 2. Yes, don't ask again / 3. No, tell bcagent what to do differently**.
+3. bcagent turns the answer into file edits and shows them as a colored diff. Choose
+   **Yes / Yes, don't ask again / No / Chat about this** with the **↑/↓ arrow keys** and `enter`
+   (or press the option's number, `y`, `n` or `esc`). **Chat about this** lets you type a reply
+   to clarify the request or ask for a different change. It is offered every time bcagent asks
+   you something.
 4. After writing a `.py` file, bcagent compiles it. On a syntax error it asks the model to fix the
    file, up to 2 times by default.
-5. If the model suggests a command (for example `python calc.py`), bcagent asks before running it.
-   If the command fails, you can send the error back to the model to fix.
+5. bcagent offers to run the Python scripts it writes, even when the model didn't suggest a command,
+   and it asks before running any command. Python code runs with the project's own `.venv` if there
+   is one. Otherwise it uses a private environment (`~/.bcagent/runenv`), so `python` and `pip install`
+   work even on machines without a system Python or where `pip` is blocked. The output goes back to
+   the agent, and if the script fails you can send the error to the model to fix. Run a file any time
+   with `/run file.py`.
 
 ### Inside the session
 
@@ -106,6 +126,7 @@ Each request goes through these steps:
 |-------|--------|
 | `@file.py` / `@folder/` | tag a file or folder: its content is sent to the agent (`@` + tab completes, like Claude Code) |
 | `!command` | run a shell command; its output goes to the agent with your next prompt |
+| `↑` / `↓`, `enter` | pick an option when bcagent asks (or press its number); **Chat about this** to reply instead |
 | `shift+tab` | toggle auto-accept edits |
 | `esc` then `enter` | new line |
 | `quit`, `exit`, `ctrl+c`, `ctrl+d` | leave bcagent |
@@ -118,6 +139,7 @@ Each request goes through these steps:
 | `/add`, `/drop`, `/files` | pin files in context |
 | `/init` | create `BCAGENT.md` project notes (like `CLAUDE.md`) |
 | `/mcp`, `/mcp catalog`, `/mcp add <name>`, `/mcp tools` | MCP servers |
+| `/run [file.py] [args]` | run a Python file (default: the last one bcagent wrote) |
 | `/undo` | undo the last edits |
 | `/clear`, `/status`, `/doctor`, `/exit` | |
 

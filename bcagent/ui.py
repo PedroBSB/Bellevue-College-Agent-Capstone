@@ -4,10 +4,11 @@ from __future__ import annotations
 import os
 import sys
 from pathlib import Path
-from typing import List
+from typing import List, Optional, Tuple
 
 from rich.console import Console, Group
 from rich.markdown import Markdown
+from rich.markup import escape
 from rich.panel import Panel
 from rich.syntax import Syntax
 from rich.table import Table
@@ -142,24 +143,145 @@ def show_edit(edit) -> None:
         console.print(f"  [warn]⚠ {edit.warning}[/]")
 
 
-def choose(question: str, options: List[str]) -> int:
-    """Claude-Code-style numbered menu. Returns the chosen index (0-based). Esc/empty -> last option."""
+CHAT = -1                      # ask() result when the user picks "Chat about this"
+CHAT_LABEL = "Chat about this"
+
+
+def ask(question: str, options: List[str], cancel: Optional[int] = None,
+        chat: bool = True) -> Tuple[int, Optional[str]]:
+    """Claude-Code-style menu: move with the up/down arrows (or j/k) and press enter, or press a number.
+
+    With chat=True a final "Chat about this" option lets the user type a message instead (to clarify or
+    change the request); then the result is (CHAT, message). Otherwise it is (index, None).
+    `cancel` is the option chosen by esc / "n" (default: the last real option).
+    """
+    cancel = len(options) - 1 if cancel is None else cancel
+    shown = list(options) + ([CHAT_LABEL] if chat else [])
     console.print(f"[bold]{question}[/]")
-    for i, opt in enumerate(options, 1):
-        console.print(f"  [bc]{i}.[/] {opt}")
+    while True:
+        idx = None
+        if is_interactive() and not os.environ.get("BCAGENT_PLAIN_MENU"):
+            try:
+                idx = _arrow_menu([Text.from_markup(o).plain for o in shown], cancel)
+            except (KeyboardInterrupt, EOFError):
+                raise
+            except Exception:  # odd terminal (old Windows console, no tty...) -> typed answers
+                os.environ["BCAGENT_PLAIN_MENU"] = "1"
+        if idx is None:
+            idx, msg = _typed_menu(shown, cancel, chat)
+            if msg:
+                return CHAT, msg
+        if chat and idx == len(options):
+            msg = _chat_input()
+            if msg:
+                return CHAT, msg
+            continue  # empty message -> show the menu again
+        console.print(f"  [muted]⎿  {escape(Text.from_markup(shown[idx]).plain)}[/]")
+        return idx, None
+
+
+def choose(question: str, options: List[str], cancel: Optional[int] = None) -> int:
+    """Menu without the chat option. Returns the chosen index (0-based)."""
+    return ask(question, options, cancel, chat=False)[0]
+
+
+def _chat_input() -> str:
+    console.print("  [muted]Tell bcagent what you mean or what to change (enter on an empty line = back "
+                  "to the options)[/]")
+    try:
+        return console.input("  [bc]❯[/] ").strip()
+    except EOFError:
+        return ""
+
+
+def _arrow_menu(labels: List[str], cancel: int) -> int:
+    from prompt_toolkit.application import Application
+    from prompt_toolkit.key_binding import KeyBindings
+    from prompt_toolkit.layout import Layout
+    from prompt_toolkit.layout.containers import Window
+    from prompt_toolkit.layout.controls import FormattedTextControl
+    from prompt_toolkit.styles import Style
+
+    state = {"i": 0}
+    n = len(labels)
+
+    def render():
+        out = []
+        for k, label in enumerate(labels):
+            sel = k == state["i"]
+            out.append(("class:sel" if sel else "", f"{'❯' if sel else ' '} {k + 1}. {label}\n"))
+        out.append(("class:hint", f"  ↑/↓ to move · enter to select · 1-{n} shortcut · esc to cancel"))
+        return out
+
+    kb = KeyBindings()
+
+    @kb.add("up")
+    @kb.add("k")
+    @kb.add("s-tab")
+    def _up(event):
+        state["i"] = (state["i"] - 1) % n
+
+    @kb.add("down")
+    @kb.add("j")
+    @kb.add("tab")
+    def _down(event):
+        state["i"] = (state["i"] + 1) % n
+
+    @kb.add("enter")
+    def _enter(event):
+        event.app.exit(result=state["i"])
+
+    def pick(k):
+        return lambda event: event.app.exit(result=k)
+
+    for k in range(min(n, 9)):
+        kb.add(str(k + 1))(pick(k))
+    kb.add("y")(pick(0))
+    kb.add("n")(pick(cancel))
+    kb.add("escape", eager=True)(pick(cancel))
+    kb.add("q")(pick(cancel))
+
+    @kb.add("c-c")
+    def _ctrl_c(event):
+        event.app.exit(exception=KeyboardInterrupt)
+
+    @kb.add("c-d")
+    def _ctrl_d(event):
+        event.app.exit(exception=EOFError)
+
+    # No cursor-position requests: terminals that don't answer them would swallow the next keys typed.
+    os.environ.setdefault("PROMPT_TOOLKIT_NO_CPR", "1")
+    style = Style.from_dict({"sel": f"bold {BC_BLUE_LIGHT}", "hint": "#8a8a8a"})
+    app = Application(layout=Layout(Window(FormattedTextControl(render, show_cursor=False),
+                                           dont_extend_height=True)),
+                      key_bindings=kb, style=style, full_screen=False, erase_when_done=True,
+                      mouse_support=False)
+    return app.run()
+
+
+def _typed_menu(labels: List[str], cancel: int, chat: bool) -> Tuple[int, Optional[str]]:
+    """Fallback when arrow keys can't be used: type a number (or y/n). With chat on, any other text
+    is sent to bcagent as a message."""
+    for k, label in enumerate(labels, 1):
+        console.print(f"  [bc]{k}.[/] {label}")
     while True:
         try:
-            ans = console.input("[bc]❯[/] ").strip().lower()
+            ans = console.input("[bc]❯[/] ").strip()
         except EOFError:
-            return len(options) - 1
-        if ans.isdigit() and 1 <= int(ans) <= len(options):
-            return int(ans) - 1
-        if ans in ("y", "yes", ""):
-            return 0
-        if ans in ("n", "no", "q"):
-            return len(options) - 1
-        if ans in ("a", "always") and len(options) > 2:
-            return 1
+            return cancel, None
+        low = ans.lower()
+        if low.isdigit() and 1 <= int(low) <= len(labels):
+            return int(low) - 1, None
+        if low in ("y", "yes", ""):
+            return 0, None
+        if low in ("n", "no", "q"):
+            return cancel, None
+        if low in ("a", "always") and cancel >= 2:
+            return 1, None
+        if chat and low in ("c", "chat"):
+            return len(labels) - 1, None
+        if chat:
+            return CHAT, ans
 
 
 def is_interactive() -> bool:

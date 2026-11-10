@@ -1,5 +1,8 @@
 # bcagent installer for Windows (PowerShell 5+)
 # Installs everything that is missing: Python 3, Ollama, the bcagent CLI and the default local model.
+# Never needs administrator rights: Python and Ollama are installed for the current user, and if the
+# normal installers are blocked (no winget, policy blocks .exe installers...) portable copies are
+# unpacked into %USERPROFILE%\.bcagent instead.
 #
 #   powershell -ExecutionPolicy Bypass -File install.ps1            # full install
 #   powershell -ExecutionPolicy Bypass -File install.ps1 -NoModel   # skip model download
@@ -17,6 +20,8 @@ $Model       = if ($env:BCAGENT_MODEL) { $env:BCAGENT_MODEL } else { "qwen2.5-co
 $BinDir      = Join-Path $BcHome "bin"
 $ScriptDir   = if ($PSScriptRoot) { $PSScriptRoot } else { (Get-Location).Path }
 $PyVersion   = "3.12.8"
+$PrivatePy   = Join-Path $BcHome "python"
+$PrivateOll  = Join-Path $BcHome "ollama"
 
 function Say($m)  { Write-Host "==> " -ForegroundColor Cyan -NoNewline; Write-Host $m }
 function Ok($m)   { Write-Host "  v " -ForegroundColor Green -NoNewline; Write-Host $m }
@@ -62,8 +67,10 @@ if ($UninstallAll) {
   $userPath = [Environment]::GetEnvironmentVariable("Path", "User")
   $newPath = ($userPath -split ";" | Where-Object { $_ -and $_ -ne $BinDir }) -join ";"
   [Environment]::SetEnvironmentVariable("Path", $newPath, "User")
+  # a portable Ollama lives in $BcHome\ollama - stop it first so its files can be deleted
+  Get-Process "ollama*", "Ollama*" -ErrorAction SilentlyContinue | Stop-Process -Force -ErrorAction SilentlyContinue
   Remove-Item -Recurse -Force $BcHome -ErrorAction SilentlyContinue
-  Ok "bcagent, settings, agents and MCP servers removed"
+  Ok "bcagent, settings, agents, MCP servers and any private Python/Ollama removed"
 
   $ollama = Get-Command ollama -ErrorAction SilentlyContinue
   $ollamaExe = if ($ollama) { $ollama.Source } else { Join-Path $env:LOCALAPPDATA "Programs\Ollama\ollama.exe" }
@@ -110,6 +117,8 @@ Say "Installing bcagent for Windows ($env:PROCESSOR_ARCHITECTURE)"
 # ------------------------------------------------------------------ 1. Python
 function Find-Python {
   $candidates = @()
+  $priv = Join-Path $PrivatePy "tools\python.exe"
+  if (Test-Path $priv) { $candidates += ,@($priv) }
   if (Get-Command py -ErrorAction SilentlyContinue) { $candidates += ,@("py", "-3") }
   foreach ($n in "python", "python3") {
     $c = Get-Command $n -ErrorAction SilentlyContinue
@@ -132,26 +141,49 @@ function Find-Python {
   return $null
 }
 
+function Install-PrivatePython {
+  # Portable CPython from NuGet (a plain zip: no installer, no admin rights, includes pip and venv)
+  $pkg = if ($env:PROCESSOR_ARCHITECTURE -eq "ARM64") { "pythonarm64" } else { "python" }
+  Say "Installing a private Python $PyVersion in $PrivatePy (no administrator rights needed)"
+  $zip = Join-Path $env:TEMP "bcagent-python-$PyVersion.zip"
+  try {
+    Invoke-WebRequest "https://api.nuget.org/v3-flatcontainer/$pkg/$PyVersion/$pkg.$PyVersion.nupkg" -OutFile $zip
+    Remove-Item -Recurse -Force $PrivatePy -ErrorAction SilentlyContinue
+    New-Item -ItemType Directory -Force -Path $PrivatePy | Out-Null
+    Expand-Archive -Path $zip -DestinationPath $PrivatePy -Force
+    Remove-Item $zip -ErrorAction SilentlyContinue
+    return (Test-Path (Join-Path $PrivatePy "tools\python.exe"))
+  } catch { Warn "private Python download failed: $_"; return $false }
+}
+
 $Py = Find-Python
 if (-not $Py) {
   Say "Python 3.9+ not found - installing Python $PyVersion"
-  $installed = $false
   if (Get-Command winget -ErrorAction SilentlyContinue) {
     try {
       winget install --id Python.Python.3.12 -e --scope user --silent --accept-package-agreements --accept-source-agreements
-      $installed = $true
-    } catch { Warn "winget failed, using the python.org installer" }
+    } catch { }
+    Refresh-Path
+    $Py = Find-Python
+    if (-not $Py) { Warn "winget could not install Python - trying the python.org installer" }
   }
-  if (-not $installed -or -not (Find-Python)) {
-    $arch = if ($env:PROCESSOR_ARCHITECTURE -eq "ARM64") { "arm64" } else { "amd64" }
-    $exe = Join-Path $env:TEMP "python-$PyVersion-$arch.exe"
-    Invoke-WebRequest "https://www.python.org/ftp/python/$PyVersion/python-$PyVersion-$arch.exe" -OutFile $exe
-    Start-Process $exe -Wait -ArgumentList "/quiet", "InstallAllUsers=0", "PrependPath=1", "Include_pip=1", "Include_launcher=1"
-    Remove-Item $exe -ErrorAction SilentlyContinue
+  if (-not $Py) {
+    try {
+      $arch = if ($env:PROCESSOR_ARCHITECTURE -eq "ARM64") { "arm64" } else { "amd64" }
+      $exe = Join-Path $env:TEMP "python-$PyVersion-$arch.exe"
+      Invoke-WebRequest "https://www.python.org/ftp/python/$PyVersion/python-$PyVersion-$arch.exe" -OutFile $exe
+      $proc = Start-Process $exe -Wait -PassThru -ArgumentList "/quiet", "InstallAllUsers=0", "PrependPath=1", "Include_pip=1", "Include_launcher=0"
+      Remove-Item $exe -ErrorAction SilentlyContinue
+      if ($proc.ExitCode -ne 0) { Warn "the python.org installer failed (exit code $($proc.ExitCode))" }
+    } catch { Warn "the python.org installer could not run: $_" }
+    Refresh-Path
+    $Py = Find-Python
   }
-  Refresh-Path
-  $Py = Find-Python
-  if (-not $Py) { Die "Python was installed but not found - open a new terminal and re-run install.bat" }
+  if (-not $Py) {
+    Warn "falling back to a private Python just for bcagent"
+    if (Install-PrivatePython) { $Py = Find-Python }
+  }
+  if (-not $Py) { Die "could not install Python - install Python 3.9+ from https://www.python.org and re-run install.bat" }
 }
 Ok "Python: $Py"
 
@@ -160,7 +192,14 @@ Say "Creating virtual environment in $BcHome\venv"
 New-Item -ItemType Directory -Force -Path $BcHome | Out-Null
 Remove-Item -Recurse -Force (Join-Path $BcHome "venv") -ErrorAction SilentlyContinue
 & $Py -m venv (Join-Path $BcHome "venv")
-if ($LASTEXITCODE -ne 0) { Die "could not create a virtual environment" }
+if ($LASTEXITCODE -ne 0) {
+  Warn "this Python cannot create virtual environments - using a private Python instead"
+  Remove-Item -Recurse -Force (Join-Path $BcHome "venv") -ErrorAction SilentlyContinue
+  if (-not (Install-PrivatePython)) { Die "could not create a virtual environment" }
+  $Py = Join-Path $PrivatePy "tools\python.exe"
+  & $Py -m venv (Join-Path $BcHome "venv")
+  if ($LASTEXITCODE -ne 0) { Die "could not create a virtual environment" }
+}
 $VPy = Join-Path $BcHome "venv\Scripts\python.exe"
 & $VPy -m pip install --quiet --upgrade pip
 if ((Test-Path (Join-Path $ScriptDir "pyproject.toml")) -and (Test-Path (Join-Path $ScriptDir "bcagent"))) {
@@ -188,27 +227,46 @@ Ok "bcagent installed -> $BinDir\bcagent.cmd"
 function Find-Ollama {
   $c = Get-Command ollama -ErrorAction SilentlyContinue
   if ($c) { return $c.Source }
-  $p = Join-Path $env:LOCALAPPDATA "Programs\Ollama\ollama.exe"
-  if (Test-Path $p) { return $p }
+  foreach ($p in @((Join-Path $env:LOCALAPPDATA "Programs\Ollama\ollama.exe"), (Join-Path $PrivateOll "ollama.exe"))) {
+    if (Test-Path $p) { return $p }
+  }
   return $null
 }
 
 $Ollama = Find-Ollama
 if (-not $Ollama) {
   Say "Installing Ollama (local LLM runtime)"
-  $done = $false
   if (Get-Command winget -ErrorAction SilentlyContinue) {
-    try { winget install --id Ollama.Ollama -e --silent --accept-package-agreements --accept-source-agreements; $done = $true } catch { }
+    try { winget install --id Ollama.Ollama -e --silent --accept-package-agreements --accept-source-agreements } catch { }
+    Refresh-Path; $env:Path = "$BinDir;$env:Path"
+    $Ollama = Find-Ollama
   }
-  if (-not $done -or -not (Find-Ollama)) {
-    $setup = Join-Path $env:TEMP "OllamaSetup.exe"
-    Invoke-WebRequest "https://ollama.com/download/OllamaSetup.exe" -OutFile $setup
-    Start-Process $setup -Wait -ArgumentList "/VERYSILENT", "/NORESTART", "/SUPPRESSMSGBOXES"
-    Remove-Item $setup -ErrorAction SilentlyContinue
+  if (-not $Ollama) {
+    try {
+      $setup = Join-Path $env:TEMP "OllamaSetup.exe"
+      Invoke-WebRequest "https://ollama.com/download/OllamaSetup.exe" -OutFile $setup
+      Start-Process $setup -Wait -ArgumentList "/VERYSILENT", "/NORESTART", "/SUPPRESSMSGBOXES"
+      Remove-Item $setup -ErrorAction SilentlyContinue
+    } catch { Warn "OllamaSetup.exe could not run: $_" }
+    Refresh-Path; $env:Path = "$BinDir;$env:Path"
+    $Ollama = Find-Ollama
   }
-  Refresh-Path
-  $env:Path = "$BinDir;$env:Path"
-  $Ollama = Find-Ollama
+  if (-not $Ollama) {
+    # Portable Ollama (zip) for computers where installers are blocked - no admin rights needed
+    Warn "falling back to a portable Ollama in $PrivateOll"
+    try {
+      $arch = if ($env:PROCESSOR_ARCHITECTURE -eq "ARM64") { "arm64" } else { "amd64" }
+      $zip = Join-Path $env:TEMP "ollama-windows-$arch.zip"
+      Invoke-WebRequest "https://ollama.com/download/ollama-windows-$arch.zip" -OutFile $zip
+      Remove-Item -Recurse -Force $PrivateOll -ErrorAction SilentlyContinue
+      New-Item -ItemType Directory -Force -Path $PrivateOll | Out-Null
+      Expand-Archive -Path $zip -DestinationPath $PrivateOll -Force
+      Remove-Item $zip -ErrorAction SilentlyContinue
+      $shim = "@echo off`r`n`"$PrivateOll\ollama.exe`" %*`r`n"
+      Set-Content -Path (Join-Path $BinDir "ollama.cmd") -Value $shim -Encoding ASCII
+    } catch { Warn "portable Ollama download failed: $_" }
+    $Ollama = Find-Ollama
+  }
   if (-not $Ollama) { Die "Ollama install failed - install it from https://ollama.com/download and re-run" }
 }
 Ok "Ollama: $Ollama"

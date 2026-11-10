@@ -63,10 +63,15 @@ class Ollama:
         exe = shutil.which("ollama")
         if exe:
             return exe
+        from .config import HOME
         candidates = [
             "/usr/local/bin/ollama",
             "/opt/homebrew/bin/ollama",
             "/Applications/Ollama.app/Contents/Resources/ollama",
+            str(Path.home() / "Applications" / "Ollama.app" / "Contents" / "Resources" / "ollama"),
+            str(Path.home() / ".local" / "bin" / "ollama"),
+            str(HOME / "ollama" / "bin" / "ollama"),      # private install (no sudo) on Linux
+            str(HOME / "ollama" / "ollama.exe"),           # portable install on Windows
             str(Path(os.environ.get("LOCALAPPDATA", "")) / "Programs" / "Ollama" / "ollama.exe"),
         ]
         return next((c for c in candidates if c and Path(c).is_file()), None)

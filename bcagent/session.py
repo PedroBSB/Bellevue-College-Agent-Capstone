@@ -1,12 +1,15 @@
 """The agent loop: prompt -> local model -> proposed edits -> approval -> apply -> self-check -> repair."""
 from __future__ import annotations
 
+import ast
 import json
 import os
 import random
 import shutil
 import subprocess
+import shlex
 import sys
+from pathlib import Path
 from typing import List, Optional, Tuple
 
 from rich.live import Live
@@ -40,6 +43,7 @@ class Session:
         self.undo_stack: List[List[Tuple[str, Optional[str]]]] = []
         self.mcp = MCPManager(project.root)
         self.trusted_tools: set = set()  # MCP tools the user allowed for the whole session
+        self.last_python: Optional[str] = None  # last .py file bcagent created or changed (for /run)
 
     def start_mcp(self) -> None:
         """Connect to the configured MCP servers (first turn only)."""
@@ -155,7 +159,9 @@ class Session:
             return
         edits, commands, orphans = parse_response(text, self.project)
         if not edits and orphans:
-            e = self.adopt_orphan(orphans, prompt)
+            e, chat = self.adopt_orphan(orphans, prompt)
+            if chat:
+                return self.turn(chat)
             if e:
                 edits = [e]
         applied, feedback = self.review(edits)
@@ -175,7 +181,7 @@ class Session:
                 fix = ("Your previous answer has problems:\n" + "\n".join(problems) +
                        "\nFix them. Write the COMPLETE corrected file(s) using `FILE: path` and a code block.")
                 return self.turn(fix, repair + 1)
-        self.offer_commands(commands)
+        self.offer_commands(commands + self.run_suggestions(applied, commands, problems))
 
     # -- MCP tools ------------------------------------------------------------
     def run_tools(self, calls) -> List[str]:
@@ -188,8 +194,11 @@ class Session:
                 if self.print_mode or not ui.is_interactive():
                     results.append(f"{name}: not run (needs approval, use --yes)")
                     continue
-                c = ui.choose(f"Allow MCP tool {escape(name)}?",
-                              ["Yes", f"Yes, and don't ask again for {escape(name)} this session", "No"])
+                c, msg = ui.ask(f"Allow MCP tool {escape(name)}?",
+                                ["Yes", f"Yes, and don't ask again for {escape(name)} this session", "No"])
+                if c == ui.CHAT:
+                    results.append(f"{name}: not run. Instead the user said: {msg}")
+                    continue
                 if c == 2:
                     results.append(f"{name}: the user declined to run this tool")
                     continue
@@ -219,25 +228,32 @@ class Session:
             return self.project.pinned[0]
         return None
 
-    def adopt_orphan(self, orphans, prompt: str) -> Optional[Edit]:
-        """The model wrote code without saying which file. Offer to save it."""
+    def adopt_orphan(self, orphans, prompt: str) -> Tuple[Optional[Edit], Optional[str]]:
+        """The model wrote code without saying which file. Offer to save it.
+        Returns (edit, chat message) - the message is set when the user chose "Chat about this"."""
         code = [b for b in orphans if b.lang in ("", "python", "py", "python3") and len(b.body.strip()) > 40]
         if not code:
-            return None
+            return None, None
         block = max(code, key=lambda b: len(b.body))
         guess = self.guess_target(prompt) or ("main.py" if not self.project.exists("main.py") else None)
         if self.print_mode or not ui.is_interactive():
             path = guess if self.auto else None
         else:
-            hint = f" [{guess}]" if guess else ""
-            ans = console.input(f"[bold]Save the generated code to a file?[/] path{hint} "
-                                f"[muted](enter = accept, n = skip)[/] [bc]❯[/] ").strip()
-            path = None if ans.lower() in ("n", "no") else (ans or guess)
+            opts = ([f"Save it as {guess}"] if guess else []) + ["Save it as another file…", "Don't save it"]
+            c, msg = ui.ask("Save the generated code to a file?", opts)
+            if c == ui.CHAT:
+                return None, f"About the code you just wrote: {msg}"
+            if opts[c].startswith("Don't"):
+                path = None
+            elif opts[c].startswith("Save it as another"):
+                path = console.input("  [muted]file name[/] [bc]❯[/] ").strip() or None
+            else:
+                path = guess
         path = valid_path(path) if path else None
         if not path:
-            return None
+            return None, None
         old = self.project.read(path) if self.project.exists(path) else None
-        return Edit(path, new=block.body.rstrip("\n") + "\n", old=old)
+        return Edit(path, new=block.body.rstrip("\n") + "\n", old=old), None
 
     def review(self, edits: List[Edit]) -> Tuple[List[str], Optional[str]]:
         applied: List[str] = []
@@ -253,18 +269,22 @@ class Session:
                     console.print(f"  [muted]⎿  Not applied: {e.path} (use --yes to apply edits)[/]")
                     continue
                 verb = "create" if e.is_new else "make this edit to"
-                c = ui.choose(f"Do you want to {verb} {e.path}?",
-                              ["Yes", "Yes, and don't ask again this session (shift+tab)",
-                               "No, and tell bcagent what to do differently"])
+                c, msg = ui.ask(f"Do you want to {verb} {e.path}?",
+                                ["Yes", "Yes, and don't ask again this session (shift+tab)", "No"])
+                if c == ui.CHAT:
+                    feedback = (f"About your proposed change to {e.path} (not applied yet): {msg}\n"
+                                "Answer the question or redo the change as asked.")
+                    break
                 if c == 1:
                     self.auto = True
                 elif c == 2:
-                    fb = console.input("[bc]❯[/] [muted]what should bcagent do instead?[/] ").strip()
-                    feedback = fb or None
-                    break
+                    console.print(f"  [muted]⎿  Skipped {e.path}[/]")
+                    continue
             write_edit(self.project, e)
             batch.append((e.path, e.old))
             applied.append(e.path)
+            if e.path.endswith(".py"):
+                self.last_python = e.path
             a, r = e.stats()
             out = console if not self.print_mode else ui.err_console
             out.print(f"  [ok]⎿[/]  {'Created' if e.is_new else 'Updated'} [bc]{e.path}[/] "
@@ -294,34 +314,156 @@ class Session:
                 console.print(f"  [muted]suggested command:[/] {c}")
             return
         for cmd in commands[:5]:
-            c = ui.choose(f"Run this command?  [bc]{cmd}[/]", ["Yes", "No"])
+            c, msg = ui.ask(f"Run this command?  [bc]{escape(cmd)}[/]", ["Yes", "No"])
+            if c == ui.CHAT:
+                return self.turn(f"About the command `{cmd}` (not run yet): {msg}")
             if c != 0:
                 continue
-            code, out = run_command(cmd, str(self.project.root))
-            if code != 0:
-                console.print(f"  [err]⎿  exit code {code}[/]")
-                if ui.choose("Ask bcagent to fix this error?", ["Yes", "No"]) == 0:
-                    return self.turn(f"I ran `{cmd}` and it failed with exit code {code}:\n```\n"
-                                     f"{out[-3000:]}\n```\nFix the code.")
-            else:
-                console.print("  [ok]⎿  done[/]")
+            if self.execute(cmd) is not None:
+                return
+
+    def execute(self, cmd: str) -> Optional[bool]:
+        """Run a command, share its output with the model and offer to fix failures.
+        Returns None normally, True if a follow-up turn was started."""
+        code, out = run_command(cmd, str(self.project.root))
+        self.notes.append(f"I ran `{cmd}` (exit code {code}). Output:\n```\n{out[-2500:]}\n```")
+        if code == 0:
+            console.print("  [ok]⎿  done[/]")
+            return None
+        console.print(f"  [err]⎿  exit code {code}[/]")
+        if self.print_mode or not ui.is_interactive():
+            return None
+        c, msg = ui.ask("Ask bcagent to fix this error?", ["Yes", "No"])
+        if c == 1:
+            return None
+        extra = f"\n{msg}" if c == ui.CHAT else "\nFix the code."
+        self.notes.pop()
+        self.turn(f"I ran `{cmd}` and it failed with exit code {code}:\n```\n{out[-3000:]}\n```{extra}")
+        return True
+
+    def run_suggestions(self, applied: List[str], commands: List[str], problems: List[str]) -> List[str]:
+        """Offer to run the Python scripts bcagent just wrote when the model didn't suggest it."""
+        if problems:
+            return []
+        out = []
+        for path in applied:
+            if any(path in c or Path(path).name in c for c in commands):
+                continue
+            if is_runnable_script(self.project.resolve(path)):
+                out.append(python_command(path))
+        return out[:2]
+
+    def run_file(self, arg: str) -> None:
+        """/run [file.py] [args]: run a Python file (default: the last one bcagent wrote)."""
+        parts = shlex.split(arg, posix=os.name != "nt") if arg else []
+        target = parts[0] if parts else self.last_python
+        if not target:
+            console.print("[muted]Nothing to run yet – use [bc]/run file.py[/][/]")
+            return
+        if not self.project.exists(target):
+            console.print(f"[err]✗ {escape(target)} not found[/]")
+            return
+        cmd = python_command(target, parts[1:]) if target.endswith(".py") else " ".join([target] + parts[1:])
+        self.execute(cmd)
 
 
-def _fix_command(cmd: str) -> str:
-    """Map python/pip to whatever exists on this machine."""
+def is_runnable_script(path: Path) -> bool:
+    """True for a .py file that does something when run (not just a module of defs, not a test file)."""
+    if path.suffix != ".py" or path.name.startswith("test_") or path.name.endswith("_test.py") \
+            or path.name in ("__init__.py", "setup.py", "conftest.py"):
+        return False
+    try:
+        tree = ast.parse(path.read_text(encoding="utf-8"))
+    except (OSError, SyntaxError, ValueError):
+        return False
+    quiet = (ast.Import, ast.ImportFrom, ast.FunctionDef, ast.AsyncFunctionDef, ast.ClassDef,
+             ast.Assign, ast.AnnAssign)
+    for node in tree.body:
+        if isinstance(node, quiet):
+            continue
+        if isinstance(node, ast.Expr) and isinstance(node.value, ast.Constant):
+            continue  # docstring
+        return True
+    return False
+
+
+def _quote(arg: str) -> str:
+    if os.name == "nt":
+        return f'"{arg}"' if (" " in arg or not arg) else arg
+    return shlex.quote(arg)
+
+
+def python_command(path: str, args: Optional[List[str]] = None) -> str:
+    return " ".join(["python", _quote(path)] + [_quote(a) for a in (args or [])])
+
+
+def _usable(exe: Optional[str]) -> bool:
+    # On Windows "python.exe" in WindowsApps is the Microsoft Store stub, not a real Python.
+    return bool(exe) and "WindowsApps" not in exe
+
+
+def _venv_python(venv: Path) -> Optional[Path]:
+    for exe in (venv / "bin" / "python", venv / "Scripts" / "python.exe"):
+        if exe.is_file():
+            return exe
+    return None
+
+
+def run_env() -> Optional[Path]:
+    """bcagent's own environment for running the code it writes (~/.bcagent/runenv).
+
+    It is created on first use from the Python that runs bcagent, so it works without sudo, without a
+    system Python and on systems where `pip install` is blocked (PEP 668 "externally-managed").
+    Packages installed system-wide stay visible (--system-site-packages)."""
+    from .config import HOME
+    venv = HOME / "runenv"
+    exe = _venv_python(venv)
+    if exe:
+        return exe
+    console.print("  [muted]⎿  Setting up a Python environment for running your code (one time)…[/]")
+    try:
+        subprocess.run([sys.executable, "-m", "venv", "--system-site-packages", str(venv)],
+                       check=True, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, timeout=300)
+    except (OSError, subprocess.SubprocessError):
+        shutil.rmtree(venv, ignore_errors=True)
+        return None
+    return _venv_python(venv)
+
+
+def python_for(cwd: str) -> str:
+    """The Python to run user code with: the project's own venv, then bcagent's run environment,
+    then the system Python, then the Python that runs bcagent itself."""
+    root = Path(cwd)
+    for venv in (".venv", "venv", "env"):
+        exe = _venv_python(root / venv)
+        if exe:
+            return str(exe)
+    exe = run_env()
+    if exe:
+        return str(exe)
+    for name in ("python3", "python"):
+        found = shutil.which(name)
+        if _usable(found):
+            return found
+    return sys.executable
+
+
+def _fix_command(cmd: str, cwd: str = ".") -> str:
+    """Run python/pip commands with a Python that really exists and can install packages."""
     head, _, rest = cmd.partition(" ")
-    if head in ("python", "python3") and not shutil.which(head):
-        alt = shutil.which("python3") or shutil.which("python") or shutil.which("py") or sys.executable
-        return f'"{alt}" {rest}'.strip()
-    if head in ("pip", "pip3") and not shutil.which(head):
-        alt = shutil.which("python3") or shutil.which("python") or sys.executable
-        return f'"{alt}" -m pip {rest}'.strip()
+    low = head.lower()
+    if low in ("python", "python3", "python.exe", "py"):
+        if low == "py" and rest.startswith(("-3", "-2")):
+            rest = rest[2:].lstrip()
+        return f"{_quote(python_for(cwd))} {rest}".strip()
+    if low in ("pip", "pip3", "pip.exe"):
+        return f"{_quote(python_for(cwd))} -m pip {rest}".strip()
     return cmd
 
 
 def run_command(cmd: str, cwd: str) -> Tuple[int, str]:
-    cmd = _fix_command(cmd)
-    console.print(f"[bc]$[/] {cmd}", highlight=False)
+    console.print(f"[bc]$[/] {escape(cmd)}", highlight=False)
+    cmd = _fix_command(cmd, cwd)
     env = dict(os.environ, PYTHONUNBUFFERED="1")
     proc = subprocess.Popen(cmd, shell=True, cwd=cwd, stdout=subprocess.PIPE,
                             stderr=subprocess.STDOUT, env=env)
