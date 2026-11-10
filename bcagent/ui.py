@@ -35,67 +35,24 @@ THEME = Theme({
 console = Console(theme=THEME, highlight=False)
 err_console = Console(theme=THEME, highlight=False, stderr=True)
 
-BULLDOG = r"""
-   .-"-.            .-"-.
-  / .-. \__________/ .-. \
-  \ \  /            \  / /
-   \_\/  .--.  .--.  \/_/
-     |   | o|  |o |   |
-     |   '--'  '--'   |
-     |     .----.     |
-    /|    ( (__) )    |\
-   | |  .--'----'--.  | |
-   | | (  \/\/\/\/  ) | |
-    \ \ '-.______.-' / /
-     '-.____________.-'
-"""
-
 # The multicolor Bulldog logo shown when bcagent starts. Each character has one color.
 LOGO = '''
-          ####                             X######=
-        #OOO#OOX                        =#O###OOOOO#
-      XOO#== @OOX                      #OO#@==XXOOOOO
-     XOO#==XOX@#O#X    =XX=X====X=X  XOO#@@==== #OOOOOOX
-     OO===@OOO#XX#O@X#XOOOOOOOOOOOO##XXX===#X=#=@#OOOOOOX
-    #OX=X XOOOOO##O#OOOOO#XXXXXXXXXXOO#X@==#XXX#=XOOOOOOO#
-   XO#=#=@#OOOOOO###=X##OOOOOOOOOOO#XOOOOX@==#X===#OOOOOOOX
-   O#=XX=@OOOOO##X##OOOOOOOOOOOOOOOOOOOOOWOX==X===@#OOOO###
-   O#=X==XOOO#=X#OO####OOOOOOOOOOOOOOOO####OX=X=== @#OOO@XX
-   ####@#OOO#=XOOX@XXXX@#OOOOOOOOOOOOOX@#X@@#@=X=X= @OOO@
-    ##X ##O#=#O#@@#OOOOOXXOOOOOOOOOO#@#OOOOXXO=X  X==@OO=
-         #OX=##@#OO#XXXOOOOOOOOOOOOOO#OO#XOOXX=X   X= ##
-        #OX#OO@#W#@XOX@@#OOOOOOOOOOOOO#=XOX#O@X     =XX
-        O##OO#XO#@OW#@##@#OOOOOOOOOOO#X#X#WX#WX
-       #OOOOO#OO@OWO@@#WX@OOOO######OX#W@@OWX#O=
-       #OOOOOOOX@WWO@= @=XO#XXXXXXXXOX@@@@OW##O=
-        OOO#XXX@@OOOX@=  X###O#XXXXXX#@  #OW##O#X
-        ##@XX##O#XXX##@@###O#@=======X#X@XXXXX#OO#
-       O#@XOOOOOOOOOX@@#XX#O@ =@@@@@X=@#OXXXOOOOOO#
-      OXXOOOOO##X###OO#X#OOOX@@@ === @XOOO##XX#OOOO#
-     X#@OOOOOXX##OOOOOOOOOOOOO#X@ = @#OOOOOOO#X#OOOOX
-     #XOOOOOX#OOO#@#OOOOOOOOOOOO##XXOOOOOOXX#OO@#OOO#
-    #O#OOOO##OO#@@#OOOOOOOOOOOOOOO##OOOOOOOOXXO#@OO#OX
-    ##OOOOO#OOO##XOOOOOOO#OOOOOOO#X#OOOOO#XO#@O#@OO##X
-    ###OOOOOOOOOO#@OOOO#X#XOOOOO#==@#OOOX#OX@#OXOOO##X
-     #XOOOOOOOOOOOX@OOO@OW#X###===   =XXXWO@#O#XOO#=#
-     ###OOOOX#OOOOOX@#XXWWW@= @++++++@@XWWOXOOX#O#=#X
-      #=#OOO#XOOOOOO#X #OWWO@+++++++++@X##X#OOXOO#=#
-      =#=#OOO@XOOOOOOO#X@XXX@+@X###########OO#XO#=X=
-        ==X#O#@XOOOOOOOOOOOOOOOOO##O#####OOO#@##===X#=
-      XOO@ =#OO@@OOOOOOOOOOO#####=X==###OOO#@##=X #WWOOX
-    XWWWWX =X###@@#OOOO#OOOOOOOOOOOOOOOOOO#=X#=@  OWWWWO#@
-    XX#OOX   ===#X @XXOXOOOOOOOOOOOO##OOOX==XX=   OWOXX=
-           ==   XX====@=@#OOOOOOOO#=#OO#@=X=
-              =    ==XX=====#####===#X@  =  ==
-           #W#  ==      XXXXX=X=XX@       ==  =OO
-          #WWWO = =====             =======  #WWWO
-         #WOO#=        ==============   =    X#OOW#
-         ##       #WW#X = =       ==  #OWO       ##
-                  #WWWX    @OOOO#    @OWWO
-                  #WO@      #WWWX      #WO
-                  ##        @OW#        X#
-                             #WX
-                              #
+    ###O            =X###=
+   O==OOX@ =XO==OXXO=@==OOOO
+  #X@OOO##OOOOOOOOOOW==X=OOO
+  #X#O#X@O#OOOOOOOOO#@X===@O
+    #XO@W@X@OOOOOOOOXOXX  =#
+    OOOO@W@#@OOOOOOW@W#=
+    #OXOOO@@X#@=@@X@XX#OO
+   OOOO###OOOOO@#=@OO#X#OO
+  #OOOOO@OOOOOOOO#OOOOXO@OX
+  ##OOOOO@OOWWO++++XWOOXO##
+   ==O#OOOO#OW+++++##OOX==
+  XWW #=@OOOOOOOOO#OO=X= WWW
+        X=====OOO=#@===
+     WW =   ======= == WW
+         WW   WW   WW
+              @W
 '''.strip("\n")
 LOGO_COLORS = {
     "#": "#6E7678",   # grey fur
@@ -118,28 +75,15 @@ TIPS = [
 ]
 
 
-def bulldog_logo() -> Text:
-    """The big multicolor Bulldog with the bcagent name under it."""
+def bulldog_badge() -> Panel:
+    """The multicolor Bulldog logo with BELLEVUE COLLEGE under it, in a small panel."""
     art = Text()
     for line in LOGO.splitlines():
         for ch in line:
             art.append(ch, style=LOGO_COLORS.get(ch))
         art.append("\n")
     art.append("\n")
-    title = "bcagent · BELLEVUE COLLEGE"
-    art.append(" " * max(0, (LOGO_WIDTH - len(title)) // 2))
-    art.append("bcagent", style=f"bold {BC_BLUE_LIGHT}")
-    art.append(" · ", style="muted")
-    art.append("BELLEVUE COLLEGE", style=f"bold {BC_BLUE_LIGHT}")
-    return art
-
-
-def bulldog_badge() -> Panel:
-    """The Bulldog logo, drawn entirely in Bellevue College blue."""
-    art = Text(BULLDOG.strip("\n"), style=f"bold {BC_BLUE_LIGHT}")
-    art.append("\n\n")
-    width = max(len(line) for line in BULLDOG.strip("\n").splitlines())
-    art.append("BELLEVUE COLLEGE".center(width), style=f"bold {BC_BLUE_LIGHT}")
+    art.append("BELLEVUE COLLEGE".center(LOGO_WIDTH), style=f"bold {BC_BLUE_LIGHT}")
     return Panel(art, border_style=BC_BLUE_LIGHT, padding=(0, 1), expand=False)
 
 
@@ -166,12 +110,7 @@ def welcome(cwd: Path, agent_name: str, model: str) -> None:
     info.append(f"  ({model}, runs 100% locally)\n", style="muted")
     tips = Text.from_markup("\n[muted]Tips for getting started:[/]\n" +
                             "\n".join(f" {i}. {t}" for i, t in enumerate(TIPS, 1)))
-    if console.width > LOGO_WIDTH:
-        # wide enough for the big multicolor logo: show it first, then the welcome box
-        console.print(bulldog_logo())
-        console.print()
-        body = Group(info, tips)
-    elif console.width >= 88:
+    if console.width >= 88:
         grid = Table.grid(padding=(0, 3))
         grid.add_column()
         grid.add_column(vertical="middle")
