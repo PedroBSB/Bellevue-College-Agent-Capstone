@@ -1,19 +1,8 @@
 # bcagent — Bellevue College Agent (Capstone)
 
-```
-   .-"-.            .-"-.
-  / .-. \__________/ .-. \    bcagent
-  \ \  /            \  / /    Bellevue College Agent
-   \_\/  .--.  .--.  \/_/     a Claude Code style CLI that writes
-     |   | o|  |o |   |       Python code with a tiny LOCAL LLM
-     |   '--'  '--'   |
-     |     .----.     |
-    /|    ( (__) )    |\
-   | |  .--'----'--.  | |
-   | | (  \/\/\/\/  ) | |
-    \ \ '-.______.-' / /
-     '-.____________.-'
-```
+<p align="center">
+  <img src="assets/bcagent-logo.svg" alt="bcagent: Bellevue College Agent, the multicolor Bulldog logo" width="520">
+</p>
 
 `bcagent` is a terminal coding agent modeled on Claude Code. You type a prompt, it reads your
 project, generates Python code, shows you a diff, and edits files once you approve. It runs
