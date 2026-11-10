@@ -35,24 +35,53 @@ THEME = Theme({
 console = Console(theme=THEME, highlight=False)
 err_console = Console(theme=THEME, highlight=False, stderr=True)
 
-# The multicolor Bulldog logo shown when bcagent starts. Each character has one color.
+# The multicolor Bulldog drawing (each character is one color). It is shrunk into solid
+# half-block pixels for the terminal by logo_pixels().
 LOGO = '''
-    ###O            =X###=
-   O==OOX@ =XO==OXXO=@==OOOO
-  #X@OOO##OOOOOOOOOOW==X=OOO
-  #X#O#X@O#OOOOOOOOO#@X===@O
-    #XO@W@X@OOOOOOOOXOXX  =#
-    OOOO@W@#@OOOOOOW@W#=
-    #OXOOO@@X#@=@@X@XX#OO
-   OOOO###OOOOO@#=@OO#X#OO
-  #OOOOO@OOOOOOOO#OOOOXO@OX
-  ##OOOOO@OOWWO++++XWOOXO##
-   ==O#OOOO#OW+++++##OOX==
-  XWW #=@OOOOOOOOO#OO=X= WWW
-        X=====OOO=#@===
-     WW =   ======= == WW
-         WW   WW   WW
-              @W
+          ####                             X######=
+        #OOO#OOX                        =#O###OOOOO#
+      XOO#== @OOX                      #OO#@==XXOOOOO
+     XOO#==XOX@#O#X    =XX=X====X=X  XOO#@@==== #OOOOOOX
+     OO===@OOO#XX#O@X#XOOOOOOOOOOOO##XXX===#X=#=@#OOOOOOX
+    #OX=X XOOOOO##O#OOOOO#XXXXXXXXXXOO#X@==#XXX#=XOOOOOOO#
+   XO#=#=@#OOOOOO###=X##OOOOOOOOOOO#XOOOOX@==#X===#OOOOOOOX
+   O#=XX=@OOOOO##X##OOOOOOOOOOOOOOOOOOOOOWOX==X===@#OOOO###
+   O#=X==XOOO#=X#OO####OOOOOOOOOOOOOOOO####OX=X=== @#OOO@XX
+   ####@#OOO#=XOOX@XXXX@#OOOOOOOOOOOOOX@#X@@#@=X=X= @OOO@
+    ##X ##O#=#O#@@#OOOOOXXOOOOOOOOOO#@#OOOOXXO=X  X==@OO=
+         #OX=##@#OO#XXXOOOOOOOOOOOOOO#OO#XOOXX=X   X= ##
+        #OX#OO@#W#@XOX@@#OOOOOOOOOOOOO#=XOX#O@X     =XX
+        O##OO#XO#@OW#@##@#OOOOOOOOOOO#X#X#WX#WX
+       #OOOOO#OO@OWO@@#WX@OOOO######OX#W@@OWX#O=
+       #OOOOOOOX@WWO@= @=XO#XXXXXXXXOX@@@@OW##O=
+        OOO#XXX@@OOOX@=  X###O#XXXXXX#@  #OW##O#X
+        ##@XX##O#XXX##@@###O#@=======X#X@XXXXX#OO#
+       O#@XOOOOOOOOOX@@#XX#O@ =@@@@@X=@#OXXXOOOOOO#
+      OXXOOOOO##X###OO#X#OOOX@@@ === @XOOO##XX#OOOO#
+     X#@OOOOOXX##OOOOOOOOOOOOO#X@ = @#OOOOOOO#X#OOOOX
+     #XOOOOOX#OOO#@#OOOOOOOOOOOO##XXOOOOOOXX#OO@#OOO#
+    #O#OOOO##OO#@@#OOOOOOOOOOOOOOO##OOOOOOOOXXO#@OO#OX
+    ##OOOOO#OOO##XOOOOOOO#OOOOOOO#X#OOOOO#XO#@O#@OO##X
+    ###OOOOOOOOOO#@OOOO#X#XOOOOO#==@#OOOX#OX@#OXOOO##X
+     #XOOOOOOOOOOOX@OOO@OW#X###===   =XXXWO@#O#XOO#=#
+     ###OOOOX#OOOOOX@#XXWWW@= @++++++@@XWWOXOOX#O#=#X
+      #=#OOO#XOOOOOO#X #OWWO@+++++++++@X##X#OOXOO#=#
+      =#=#OOO@XOOOOOOO#X@XXX@+@X###########OO#XO#=X=
+        ==X#O#@XOOOOOOOOOOOOOOOOO##O#####OOO#@##===X#=
+      XOO@ =#OO@@OOOOOOOOOOO#####=X==###OOO#@##=X #WWOOX
+    XWWWWX =X###@@#OOOO#OOOOOOOOOOOOOOOOOO#=X#=@  OWWWWO#@
+    XX#OOX   ===#X @XXOXOOOOOOOOOOOO##OOOX==XX=   OWOXX=
+           ==   XX====@=@#OOOOOOOO#=#OO#@=X=
+              =    ==XX=====#####===#X@  =  ==
+           #W#  ==      XXXXX=X=XX@       ==  =OO
+          #WWWO = =====             =======  #WWWO
+         #WOO#=        ==============   =    X#OOW#
+         ##       #WW#X = =       ==  #OWO       ##
+                  #WWWX    @OOOO#    @OWWO
+                  #WO@      #WWWX      #WO
+                  ##        @OW#        X#
+                             #WX
+                              #
 '''.strip("\n")
 LOGO_COLORS = {
     "#": "#6E7678",   # grey fur
@@ -63,7 +92,76 @@ LOGO_COLORS = {
     "W": "#FAFAFA",   # white highlights
     "+": "#D85549",   # tongue
 }
-LOGO_WIDTH = max(len(line) for line in LOGO.splitlines())
+LOGO_WIDTH = 28   # columns of the solid logo in the terminal
+LOGO_LINES = 16   # terminal lines (each line holds two pixel rows: ▀ top, ▄ bottom)
+
+
+def logo_pixels(width: int = LOGO_WIDTH, lines: int = LOGO_LINES) -> List[List[Optional[str]]]:
+    """Shrink the character drawing into a grid of hex colors (None = transparent).
+
+    Gaps inside the dog are filled first, so the result is solid; each pixel is the average color
+    of the characters it covers, except that the eyes, teeth and tongue are kept crisp."""
+    rows = LOGO.splitlines()
+    h, w = len(rows), max(len(r) for r in rows)
+    grid = [list(r.ljust(w)) for r in rows]
+    outside = [[False] * w for _ in range(h)]
+    stack = [(y, x) for y in range(h) for x in (0, w - 1)] + [(y, x) for x in range(w) for y in (0, h - 1)]
+    while stack:
+        y, x = stack.pop()
+        if 0 <= y < h and 0 <= x < w and not outside[y][x] and grid[y][x] == " ":
+            outside[y][x] = True
+            stack += [(y + 1, x), (y - 1, x), (y, x + 1), (y, x - 1)]
+    for _ in range(6):  # fill holes inside the silhouette from their neighbours
+        for y in range(h):
+            for x in range(w):
+                if grid[y][x] == " " and not outside[y][x]:
+                    for dy, dx in ((0, -1), (0, 1), (-1, 0), (1, 0)):
+                        yy, xx = y + dy, x + dx
+                        if 0 <= yy < h and 0 <= xx < w and grid[yy][xx] != " ":
+                            grid[y][x] = grid[yy][xx]
+                            break
+    rgb = {k: tuple(int(v[i:i + 2], 16) for i in (1, 3, 5)) for k, v in LOGO_COLORS.items()}
+    ph = lines * 2
+    out: List[List[Optional[str]]] = []
+    for py in range(ph):
+        row: List[Optional[str]] = []
+        y0 = py * h // ph
+        y1 = max(y0 + 1, (py + 1) * h // ph)
+        for px in range(width):
+            x0 = px * w // width
+            x1 = max(x0 + 1, (px + 1) * w // width)
+            cells = [grid[y][x] for y in range(y0, y1) for x in range(x0, x1)]
+            solid = [c for c in cells if c in rgb]
+            if len(solid) < len(cells) / 2:
+                row.append(None)
+                continue
+            keep = next((k for k in "+W" if cells.count(k) * 3 >= len(cells)), None)
+            if keep:
+                row.append(LOGO_COLORS[keep])
+                continue
+            r, g, b = (sum(rgb[c][i] for c in solid) // len(solid) for i in range(3))
+            row.append(f"#{r:02X}{g:02X}{b:02X}")
+        out.append(row)
+    return out
+
+
+def logo_text() -> Text:
+    """The solid multicolor Bulldog as rich Text, two pixels per character cell."""
+    px = logo_pixels()
+    art = Text()
+    for y in range(0, len(px), 2):
+        for top, bottom in zip(px[y], px[y + 1]):
+            if top and bottom:
+                art.append("▀", style=f"{top} on {bottom}")
+            elif top:
+                art.append("▀", style=top)
+            elif bottom:
+                art.append("▄", style=bottom)
+            else:
+                art.append(" ")
+        art.append("\n")
+    return art
+
 
 
 TIPS = [
@@ -76,12 +174,8 @@ TIPS = [
 
 
 def bulldog_badge() -> Panel:
-    """The multicolor Bulldog logo with BELLEVUE COLLEGE under it, in a small panel."""
-    art = Text()
-    for line in LOGO.splitlines():
-        for ch in line:
-            art.append(ch, style=LOGO_COLORS.get(ch))
-        art.append("\n")
+    """The solid multicolor Bulldog with BELLEVUE COLLEGE under it, in a small panel."""
+    art = logo_text()
     art.append("\n")
     art.append("BELLEVUE COLLEGE".center(LOGO_WIDTH), style=f"bold {BC_BLUE_LIGHT}")
     return Panel(art, border_style=BC_BLUE_LIGHT, padding=(0, 1), expand=False)

@@ -1,7 +1,7 @@
 # bcagent — Bellevue College Agent (Capstone)
 
 <p align="center">
-  <img src="assets/bcagent-logo.svg" alt="bcagent: Bellevue College Agent, the multicolor Bulldog logo" width="340">
+  <img src="assets/bcagent-logo.svg" alt="bcagent: Bellevue College Agent, the multicolor Bulldog logo" width="300">
 </p>
 
 `bcagent` is a terminal coding agent modeled on Claude Code. You type a prompt, it reads your
