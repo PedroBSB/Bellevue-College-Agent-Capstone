@@ -5,6 +5,7 @@ import ast
 import json
 import os
 import random
+import re
 import shutil
 import subprocess
 import shlex
@@ -19,6 +20,7 @@ from rich.text import Text
 
 from . import ui
 from .agents import Agent
+from .colab import ColabError, ColabSync, check_source
 from .edits import Edit, check_python, parse_response, valid_path, write_edit
 from .llm import Ollama
 from .mcp import MCPError, MCPManager, parse_tool_calls
@@ -44,6 +46,7 @@ class Session:
         self.mcp = MCPManager(project.root)
         self.trusted_tools: set = set()  # MCP tools the user allowed for the whole session
         self.last_python: Optional[str] = None  # last .py file bcagent created or changed (for /run)
+        self.colab = ColabSync(project.root)    # Colab notebooks linked with /colab
 
     def start_mcp(self) -> None:
         """Connect to the configured MCP servers (first turn only)."""
@@ -89,6 +92,13 @@ class Session:
             if targets:
                 hint = ("\n\nChange the existing file(s) " + ", ".join(targets) +
                         " (shown above). Do not create other files unless the task asks for it.")
+            notebooks = [f for f in dict.fromkeys(targets + self.project.pinned) if self.colab.is_mirror(f)]
+            if notebooks:
+                hint += ("\n" + ", ".join(notebooks) + " is a Google Colab notebook. Each cell starts with a "
+                         "`# %%` line; text cells start with `# %% [markdown]` and every line is commented "
+                         "with `# `. Keep the cell lines, add new cells with `# %%`, and use `!pip install` "
+                         "for packages. Change the notebook by writing the whole file as `FILE: " + notebooks[0] +
+                         "`. bcagent uploads it to Colab after the user approves.")
             if self.agent.edit_format == "whole":
                 hint += "\nAnswer with `FILE: <path>` followed by the COMPLETE updated file in a code block."
         user = f"{ctx}\n\n{notes}Task: {prompt}{hint}"
@@ -168,10 +178,13 @@ class Session:
         if feedback:
             return self.turn(feedback)
         problems = [f"- {e.path}: {e.error}" for e in edits if e.error]
+        broken = set()
         for path in applied:
-            err = check_python(self.project, path)
+            err = self.check(path)
             if err:
                 problems.append(f"- {path}: {err}")
+                broken.add(path)
+        self.sync_colab([p for p in applied if p not in broken])
         if problems:
             for p in problems:
                 console.print(f"  [err]✗[/] {p[2:]}")
@@ -182,6 +195,32 @@ class Session:
                        "\nFix them. Write the COMPLETE corrected file(s) using `FILE: path` and a code block.")
                 return self.turn(fix, repair + 1)
         self.offer_commands(commands + self.run_suggestions(applied, commands, problems))
+
+    def check(self, path: str) -> Optional[str]:
+        if self.colab.is_mirror(path):  # notebook cells may use !pip / %magic lines
+            try:
+                return check_source(self.project.read(path), path)
+            except OSError as e:
+                return str(e)
+        return check_python(self.project, path)
+
+    # -- Colab ----------------------------------------------------------------
+    def sync_colab(self, paths: List[str]) -> None:
+        """Upload changed Colab notebook mirrors to Google Drive."""
+        out = console if not self.print_mode else ui.err_console
+        for path in paths:
+            if not self.colab.is_mirror(path):
+                continue
+            try:
+                done = self.colab.push(path, ask=not self.print_mode)
+            except ColabError as e:
+                out.print(f"  [err]✗ not saved to Colab:[/] {e}")
+                continue
+            if done:
+                out.print(f"  [ok]⎿[/]  Saved to Colab: [bc]{escape(self.colab.links[path]['name'])}[/] "
+                          "[muted](reload the Colab tab to see it)[/]")
+            else:
+                out.print(f"  [muted]⎿  Not uploaded – {path} keeps the change; /colab push uploads it[/]")
 
     # -- MCP tools ------------------------------------------------------------
     def run_tools(self, calls) -> List[str]:
@@ -306,6 +345,8 @@ class Session:
             else:
                 p.write_text(old, encoding="utf-8")
                 console.print(f"  [warn]↺[/] restored {path}")
+                if self.colab.is_mirror(path):
+                    self.sync_colab([path])
 
     # -- commands -------------------------------------------------------------
     def offer_commands(self, commands: List[str]) -> None:
@@ -347,6 +388,8 @@ class Session:
             return []
         out = []
         for path in applied:
+            if self.colab.is_mirror(path):
+                continue  # notebooks run in Colab, not here
             if any(path in c or Path(path).name in c for c in commands):
                 continue
             if is_runnable_script(self.project.resolve(path)):
@@ -465,6 +508,9 @@ def run_command(cmd: str, cwd: str) -> Tuple[int, str]:
     console.print(f"[bc]$[/] {escape(cmd)}", highlight=False)
     cmd = _fix_command(cmd, cwd)
     env = dict(os.environ, PYTHONUNBUFFERED="1")
+    if re.match(r"\s*(git|gh)\b", cmd) or "&& git " in cmd:
+        from .git import auth_env
+        env = auth_env(env)  # GitHub token for push / pull / clone, never shown in the command
     proc = subprocess.Popen(cmd, shell=True, cwd=cwd, stdout=subprocess.PIPE,
                             stderr=subprocess.STDOUT, env=env)
     out = bytearray()

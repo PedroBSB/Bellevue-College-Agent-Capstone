@@ -8,10 +8,11 @@ import sys
 from pathlib import Path
 from typing import List, Optional
 
+from rich.markup import escape
 from rich.progress import BarColumn, DownloadColumn, Progress, TextColumn, TransferSpeedColumn
 from rich.table import Table
 
-from . import __version__, agents as agents_mod, mcp as mcp_mod, ui, update as update_mod
+from . import __version__, agents as agents_mod, colab as colab_mod, git as git_mod, mcp as mcp_mod, ui, update as update_mod
 from .agents import CATALOG, Agent, all_agents
 from .config import AGENTS_DIR, CONFIG_FILE, HISTORY_FILE, load_config, save_config
 from .llm import Ollama, OllamaError
@@ -30,6 +31,9 @@ COMMANDS = [
     ("/files", "Show files in context"),
     ("/init", f"Create {MEMORY_FILE} with notes about this project"),
     ("/mcp", "MCP servers: /mcp [list|catalog|add <name|@npm/pkg|pypi:pkg>|remove <name>|tools]"),
+    ("/git", "Git: /git [status|diff|commit|push|pull|log|branch|switch|merge|revert|uncommit|init|clone|...]"),
+    ("/github", "GitHub: /github [login|logout|status|create|pr|prs|open|clone]"),
+    ("/colab", "Edit a Google Colab notebook: /colab <url> [pull|push|open|list|unlink|login|logout]"),
     ("/run", "Run a Python file: /run [file.py] [args] (default: the last file bcagent wrote)"),
     ("/undo", "Undo the last set of file edits"),
     ("/auto", "Toggle auto-accept of edits (same as shift+tab)"),
@@ -50,6 +54,9 @@ HELP = """[bold]bcagent[/] – Bellevue College Agent. Type what you want and pr
 [bold]Shortcuts[/]
   [bc]@file[/]        include a file or folder in the context
   [bc]!command[/]     run a shell command (output is shared with bcagent)
+  [bc]/git[/]          git status · [bc]/git commit[/] · [bc]/git push[/] · [bc]/git revert[/] … ([bc]/git help[/])
+  [bc]/github create[/] put this folder on GitHub · [bc]/github pr[/] open a pull request
+  [bc]/colab[/] url    edit a Google Colab notebook (bcagent helps you sign in to Google)
   [bc]/run[/] file.py  run a Python file (bcagent also offers to run the scripts it writes)
   [bc]↑/↓ enter[/]    pick an option when bcagent asks; or choose [bc]Chat about this[/] to reply
   [bc]shift+tab[/]    toggle auto-accept edits
@@ -95,6 +102,11 @@ def doctor(client: Ollama, cfg: dict) -> None:
     t.add_row("system", f"{platform.system()} {platform.release()} {platform.machine()}")
     exe = client.binary()
     t.add_row("ollama binary", f"{ok} {exe}" if exe else f"{bad} not found – https://ollama.com/download")
+    import shutil as _sh
+    gitexe = _sh.which("git")
+    t.add_row("git", f"{ok} {gitexe}" if gitexe else f"{bad} not found – https://git-scm.com/downloads")
+    t.add_row("github", f"{ok} {git_mod.token_source()[1]}" if git_mod.token() else
+              "[muted]not signed in – /github login[/]")
     ver = client.version()
     t.add_row("ollama server", f"{ok} {client.host} (v{ver})" if ver else f"{bad} not running at {client.host}")
     agent = all_agents(Path.cwd()).get(cfg.get("agent", "bulldog"))
@@ -323,6 +335,179 @@ def mcp_command(argv: List[str]) -> int:
     return 0
 
 
+# -- Google Colab --------------------------------------------------------------------
+
+COLAB_HELP = """[bold]/colab[/] – let bcagent edit a Google Colab notebook
+
+  [bc]/colab <url>[/]       link a notebook (https://colab.research.google.com/drive/…)
+  [bc]/colab pull[/]        download the latest version from Colab
+  [bc]/colab push[/]        upload the local copy to Colab ([bc]--force[/] ignores changes made in Colab)
+  [bc]/colab open[/]        open the notebook in your browser
+  [bc]/colab list[/]        linked notebooks and sign-in status
+  [bc]/colab unlink[/]      stop syncing a notebook (the local file stays)
+  [bc]/colab login[/]       sign in to Google (bcagent guides you)  ·  [bc]/colab logout[/]
+
+[muted]bcagent copies the notebook to colab/<name>.py (cells start with '# %%'). Ask for changes as usual, \
+for example "add a cell that plots the data". After you approve an edit, bcagent saves it to Colab. \
+Reload the Colab tab to see it.[/]"""
+
+
+def print_colab(sync: "colab_mod.ColabSync") -> None:
+    creds = sync.drive.creds
+    who = creds.token().get("email", "")
+    console.print(f"Google sign-in: [bc]{creds.kind()}[/]" + (f" [muted]({who})[/]" if who else ""))
+    if not sync.links:
+        console.print("[muted]No notebooks linked yet – use[/] [bc]/colab <url>[/]")
+        return
+    t = Table(border_style=ui.BC_BLUE_LIGHT, header_style="bc")
+    t.add_column("local file")
+    t.add_column("notebook")
+    t.add_column("link")
+    for rel, link in sync.links.items():
+        t.add_row(rel, link.get("name", "") + ("" if link.get("can_edit", True) else " [warn](view only)[/]"),
+                  link.get("url", ""))
+    console.print(t)
+
+
+def _pick_mirror(sync: "colab_mod.ColabSync", arg: str, session: Optional[Session] = None) -> Optional[str]:
+    arg = arg.lstrip("@").strip()
+    if arg:
+        if arg in sync.links:
+            return arg
+        try:
+            fid = colab_mod.parse_url(arg)
+            rel = sync.mirror_for(fid)
+            if rel:
+                return rel
+        except colab_mod.ColabError:
+            pass
+        console.print(f"[err]✗ {escape(arg)} is not a linked notebook[/] – see [bc]/colab list[/]")
+        return None
+    if not sync.links:
+        console.print("[muted]No notebooks linked yet – use[/] [bc]/colab <url>[/]")
+        return None
+    if len(sync.links) == 1:
+        return next(iter(sync.links))
+    pinned = [p for p in (session.project.pinned if session else []) if p in sync.links]
+    if len(pinned) == 1:
+        return pinned[0]
+    names = list(sync.links)
+    if not ui.is_interactive():
+        console.print("[err]✗ more than one notebook is linked – name the file[/]")
+        return None
+    c = ui.choose("Which notebook?", names + ["Cancel"], cancel=len(names))
+    return names[c] if c < len(names) else None
+
+
+def colab_link(sync: "colab_mod.ColabSync", url: str, session: Optional[Session] = None) -> Optional[str]:
+    try:
+        colab_mod.parse_url(url)  # check the link before asking to sign in
+        if not sync.ensure_signed_in():
+            return None
+        with console.status("[bc]Downloading the notebook from Google Drive…[/]", spinner="dots",
+                            spinner_style=ui.BC_BLUE_LIGHT):
+            rel = sync.link(url)
+    except colab_mod.ColabError as e:
+        console.print(f"[err]✗ {e}[/]")
+        return None
+    link = sync.links[rel]
+    cells = len(colab_mod.text_to_cells((sync.root / rel).read_text(encoding="utf-8")))
+    console.print(f"[ok]✓[/] linked [bc]{escape(link['name'])}[/] ({cells} cells) → [bc]{rel}[/]")
+    if not link.get("can_edit", True):
+        console.print("  [warn]⚠ you can only view this notebook.[/] In Colab choose File ▸ Save a copy in Drive "
+                      "and link the copy to let bcagent save changes.")
+    if session is not None:
+        if rel not in session.project.pinned:
+            session.project.pinned.append(rel)
+        console.print(f"  [muted]⎿  Ask for changes, e.g.[/] [bc]add a cell that plots the data[/] [muted]– bcagent "
+                      "saves approved edits to Colab. Reload the Colab tab to see them, and avoid editing the "
+                      "same notebook in Colab at the same time.[/]")
+    return rel
+
+
+def handle_colab(arg: str, session: Session) -> None:
+    sync = session.colab
+    sub, _, rest = arg.partition(" ")
+    rest = rest.strip()
+    try:
+        if sub in ("help", "-h", "--help"):
+            console.print(COLAB_HELP)
+        elif sub in ("", "list", "status"):
+            if not sub and not sync.links:
+                console.print(COLAB_HELP)
+            print_colab(sync)
+        elif sub == "login":
+            colab_mod.login()
+        elif sub == "logout":
+            console.print("[ok]✓[/] signed out of Google" if colab_mod.logout() else "[muted]Not signed in.[/]")
+        elif sub in ("pull", "push", "open", "unlink"):
+            force = "--force" in rest.split()
+            rel = _pick_mirror(sync, " ".join(w for w in rest.split() if w != "--force"), session)
+            if not rel:
+                return
+            if sub == "open":
+                import webbrowser
+                webbrowser.open(sync.links[rel]["url"])
+                console.print(f"[muted]Opened[/] {sync.links[rel]['url']}")
+            elif sub == "unlink":
+                sync.unlink(rel)
+                session.project.pinned = [p for p in session.project.pinned if p != rel]
+                console.print(f"[ok]✓[/] {rel} is no longer synced with Colab (the file stays)")
+            elif not sync.ensure_signed_in():
+                return
+            elif sub == "pull":
+                with console.status("[bc]Downloading from Colab…[/]", spinner="dots", spinner_style=ui.BC_BLUE_LIGHT):
+                    n = sync.pull(rel)
+                console.print(f"[ok]✓[/] {rel} updated from Colab ({n} cells)")
+            elif sync.push(rel, force=force):
+                console.print(f"[ok]✓[/] saved {rel} to Colab [muted](reload the Colab tab to see it)[/]")
+        else:
+            colab_link(sync, arg, session)
+    except colab_mod.ColabError as e:
+        console.print(f"[err]✗ {e}[/]")
+
+
+def colab_command(argv: List[str]) -> int:
+    p = argparse.ArgumentParser(prog="bcagent colab", description="Google Colab notebooks")
+    sub = p.add_subparsers(dest="cmd")
+    sub.add_parser("login", help="sign in to Google (guided)")
+    sub.add_parser("logout", help="sign out of Google")
+    sub.add_parser("list", help="sign-in status and linked notebooks in this folder")
+    pl = sub.add_parser("link", help="link a notebook to this folder")
+    pl.add_argument("url")
+    for name in ("pull", "push"):
+        sp = sub.add_parser(name, help=f"{name} a linked notebook")
+        sp.add_argument("file", nargs="?", default="")
+        if name == "push":
+            sp.add_argument("--force", action="store_true")
+    a = p.parse_args(argv)
+    sync = colab_mod.ColabSync(Path.cwd())
+    try:
+        if a.cmd == "login":
+            return 0 if colab_mod.login() else 1
+        if a.cmd == "logout":
+            colab_mod.logout()
+            console.print("[ok]✓[/] signed out of Google")
+        elif a.cmd in (None, "list"):
+            print_colab(sync)
+        elif a.cmd == "link":
+            return 0 if colab_link(sync, a.url) else 1
+        else:
+            rel = _pick_mirror(sync, a.file)
+            if not rel or not sync.ensure_signed_in():
+                return 1
+            if a.cmd == "pull":
+                console.print(f"[ok]✓[/] {rel} updated from Colab ({sync.pull(rel)} cells)")
+            elif sync.push(rel, force=a.force):
+                console.print(f"[ok]✓[/] saved {rel} to Colab")
+            else:
+                return 1
+    except colab_mod.ColabError as e:
+        console.print(f"[err]✗ {e}[/]")
+        return 1
+    return 0
+
+
 # -- interactive REPL -----------------------------------------------------------
 
 def make_prompt(session: Session):
@@ -485,6 +670,14 @@ def handle_slash(line: str, session: Session, client: Ollama, cfg: dict) -> bool
             console.print("[muted]Restarting bcagent…[/]")
             session.mcp.close()
             update_mod.restart(["-C", str(proj.root), "-a", session.agent.name])
+    elif cmd in ("/git", "/github"):
+        try:
+            g = git_mod.GitCommands(proj.root, session)
+            (g.git if cmd == "/git" else g.github)(arg)
+        except git_mod.GitError as e:
+            console.print(f"[err]✗ {e}[/]")
+    elif cmd == "/colab":
+        handle_colab(arg, session)
     elif cmd == "/run":
         session.run_file(arg)
     elif cmd == "/undo":
@@ -553,6 +746,16 @@ def main(argv: Optional[List[str]] = None) -> None:
         sys.exit(agents_command(argv[1:], client, cfg))
     if argv and argv[0] == "mcp":
         sys.exit(mcp_command(argv[1:]))
+    if argv and argv[0] in ("git", "github"):
+        try:
+            g = git_mod.GitCommands(Path.cwd())
+            (g.git if argv[0] == "git" else g.github)(" ".join(argv[1:]))
+        except git_mod.GitError as e:
+            console.print(f"[err]✗ {e}[/]")
+            sys.exit(1)
+        return
+    if argv and argv[0] == "colab":
+        sys.exit(colab_command(argv[1:]))
     if argv and argv[0] == "doctor":
         doctor(client, cfg)
         return
@@ -565,7 +768,9 @@ def main(argv: Optional[List[str]] = None) -> None:
         description="bcagent – Bellevue College Agent: a local AI coding CLI (like Claude Code) "
                     "powered by the smallest, fastest local code LLM.",
         epilog="Other commands: `bcagent agents [list|catalog|install|remove|use|create]`, "
-               "`bcagent mcp [list|catalog|add|remove|tools]`, `bcagent doctor`, `bcagent update`")
+               "`bcagent mcp [list|catalog|add|remove|tools]`, `bcagent colab [login|logout|list|link|pull|push]`, "
+               "`bcagent github [login|status|create|pr]`, `bcagent git <command>`, "
+               "`bcagent doctor`, `bcagent update`")
     p.add_argument("prompt", nargs="*", help="initial prompt")
     p.add_argument("-p", "--print", action="store_true", dest="print_mode",
                    help="non-interactive: answer the prompt, print the result and exit")
@@ -573,6 +778,7 @@ def main(argv: Optional[List[str]] = None) -> None:
     p.add_argument("-a", "--agent", help="agent to use (see `bcagent agents list`)")
     p.add_argument("-m", "--model", help="override the Ollama model for this run")
     p.add_argument("-C", "--cwd", default=".", help="project folder (default: current folder)")
+    p.add_argument("--colab", metavar="URL", help="link a Google Colab notebook and edit it")
     p.add_argument("-v", "--version", action="version", version=f"bcagent {__version__}")
     a = p.parse_args(argv)
 
@@ -602,6 +808,12 @@ def main(argv: Optional[List[str]] = None) -> None:
     if not ensure_model(client, agent.model):
         sys.exit(1)
     session = Session(project, agent, cfg, client, auto=a.yes, print_mode=a.print_mode)
+    if a.colab:
+        rel = colab_link(session.colab, a.colab, session)
+        if not rel:
+            sys.exit(1)
+        if prompt and rel not in prompt:
+            prompt += f" (in @{rel})"
     if a.print_mode:
         try:
             session.turn(prompt)

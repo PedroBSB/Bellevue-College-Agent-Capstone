@@ -94,6 +94,7 @@ bcagent -p "write fizzbuzz in fizz.py" --yes  # one-shot / scripting mode, like 
 bcagent -a tester "write tests for @calc.py"  # use a specific agent
 bcagent -m qwen2.5-coder:1.5b                 # use any Ollama model for this run
 bcagent mcp add fetch                         # add a public MCP server (see below)
+bcagent --colab https://colab.research.google.com/drive/1AbC…   # edit a Google Colab notebook
 bcagent doctor                                # check the installation
 bcagent update                                # update bcagent now (it also updates itself)
 ```
@@ -138,6 +139,9 @@ Each request goes through these steps:
 | `/add`, `/drop`, `/files` | pin files in context |
 | `/init` | create `BCAGENT.md` project notes (like `CLAUDE.md`) |
 | `/mcp`, `/mcp catalog`, `/mcp add <name>`, `/mcp tools` | MCP servers |
+| `/git`, `/git commit`, `/git push`, `/git revert`, … | git version control (see below) |
+| `/github create`, `/github pr`, `/github login` | GitHub repositories and pull requests |
+| `/colab <url>`, `/colab pull\|push\|open\|list\|unlink\|login\|logout` | edit a Google Colab notebook (see below) |
 | `/run [file.py] [args]` | run a Python file (default: the last one bcagent wrote) |
 | `/undo` | undo the last edits |
 | `/update` | check for a new bcagent version, install it and restart |
@@ -201,6 +205,103 @@ supported. npm servers need Node.js and PyPI servers need [uv](https://docs.astr
 Small models such as the default 0.5B one rarely use tools well; a larger agent like `bulldog-3b`
 works better with MCP.
 
+## Git and GitHub
+
+bcagent has git built in. Every command runs the real `git` in your project folder and explains
+errors in plain words. It always asks before anything that changes GitHub or throws work away.
+
+```
+> /git init                 # start a repository (adds a Python .gitignore)
+> /git commit               # commit all changes – bcagent writes the message, you approve or edit it
+> /github create            # create a private GitHub repo for this folder and push it (--public to share)
+> /git branch add-tests     # new branch; edit files with bcagent as usual…
+> /git commit
+> /github pr                # push the branch and open a pull request
+```
+
+| Command | Action |
+|---------|--------|
+| `/git` | status: branch, changed files, commits to push or pull |
+| `/git init`, `/git clone <url\|owner/repo>` | start a repository / copy one from GitHub |
+| `/git diff [file]`, `/git log` | what changed / recent commits |
+| `/git commit [message]` | commit everything; without a message the local model writes one |
+| `/git push [--force]`, `/git pull` | send / get commits (shows what will be pushed and asks first) |
+| `/git branch [name]`, `/git switch <branch>`, `/git merge <branch>` | branches |
+| `/git revert [commit]` | undo a commit with a new commit (safe after pushing) |
+| `/git uncommit` | undo the last commit but keep the changes (only if it isn't pushed) |
+| `/git discard <file\|all>`, `/git stash [pop]`, `/git remote [url]` | |
+| `/git <anything else>` | runs that git command, e.g. `/git tag v1.0` |
+| `/github login`, `/github logout`, `/github status` | sign in to GitHub |
+| `/github ssh` | set up an SSH key for `git@github.com` addresses (guided) |
+| `/github create [name] [--public]`, `/github pr [title]`, `/github prs`, `/github open` | repos and pull requests |
+
+The same commands work outside a session: `bcagent git commit`, `bcagent github create`.
+Before committing, bcagent warns about files that look like secrets (`.env`, keys,
+`client_secret*.json`). The first time you commit, it asks for your name and email, and it can
+suggest your private GitHub noreply address. Git commands that the agent suggests in its answers
+(```` ```bash ```` blocks) also get GitHub access.
+
+**Signing in to GitHub.** `/github login` (or the first push or `/github create`) walks you through it:
+
+- **GitHub CLI** (if [`gh`](https://cli.github.com) is installed): sign in with the browser. If you
+  are already signed in with `gh`, bcagent uses that automatically.
+- **Personal access token**: bcagent opens a GitHub page that already fills in the name and the
+  `repo` and `workflow` scopes. Choose an expiration, click *Generate token* and paste the token
+  (it starts with `ghp_`).
+
+- **SSH key** (for `git@github.com:…` addresses): `/github ssh` checks `~/.ssh` and offers to use an
+  existing key or create one with `ssh-keygen` (the passphrase is optional). It adds GitHub's
+  published host keys to `known_hosts`, then adds the public key to your GitHub account. That happens
+  automatically when your token allows it (the `write:public_key` scope). Otherwise bcagent copies
+  the key to the clipboard and opens github.com/settings/ssh/new for you. Finally it tests the
+  connection with `ssh -T git@github.com`. If a push, pull or clone fails because SSH isn't set up,
+  bcagent offers this setup, or switches the repository to HTTPS, and then tries again.
+
+`GH_TOKEN` / `GITHUB_TOKEN` also work. The token is stored only in `~/.bcagent/github/token.json`
+(readable only by you). git gets it through a credential helper in the environment, so it is never
+written into `.git/config` or shown in a command.
+
+## Google Colab
+
+bcagent can edit your Google Colab notebooks. Paste the notebook's link:
+
+```
+> /colab https://colab.research.google.com/drive/1AbC…xyz
+✓ linked Week 3 Lab.ipynb (12 cells) → colab/week_3_lab.py
+> add a cell that loads data.csv with pandas and plots the first column
+```
+
+bcagent downloads the notebook from Google Drive into `colab/<name>.py`, one Python file where every
+cell starts with `# %%` and text cells start with `# %% [markdown]`. You ask for changes as usual and
+approve the diff. bcagent then uploads the notebook back to Colab. Cells that didn't change keep their
+outputs. **Reload the Colab tab** to see the changes, and don't edit the same notebook in Colab at the
+same time. If the notebook changed in Colab after bcagent downloaded it, bcagent asks before
+overwriting. Run `/colab pull` to get the Colab version first.
+
+| Command | Action |
+|---------|--------|
+| `/colab <url>` | link a notebook (also `bcagent --colab <url> "prompt"`, which works with `-p`) |
+| `/colab pull` / `/colab push [--force]` | download from / upload to Colab |
+| `/colab open`, `/colab list`, `/colab unlink` | open in the browser, show linked notebooks, stop syncing |
+| `/colab login`, `/colab logout` | sign in to / out of Google (also `bcagent colab login`) |
+
+**Signing in to Google.** The first `/colab` asks you to sign in and walks you through one of two options:
+
+- **Permanent (recommended, about 5 minutes once):** you create a free Google Cloud project with the
+  Drive API turned on and a *Desktop app* OAuth client, then give bcagent the downloaded
+  `client_secret_….json`. bcagent opens the browser so you can sign in, then renews the access by
+  itself. Google shows *"Google hasn't verified this app"* because the app is your own: click
+  **Continue**. In testing mode Google asks you to sign in again every 7 days. Click **Publish app** on
+  the consent screen's Audience page to avoid that.
+- **Quick (1 minute, lasts 1 hour):** in the [OAuth 2.0 Playground](https://developers.google.com/oauthplayground),
+  authorize the scope `https://www.googleapis.com/auth/drive`, exchange the code for tokens and paste the
+  access token.
+
+You can also set `BCAGENT_GOOGLE_TOKEN` to an access token yourself. Credentials are stored only on your
+computer, in `~/.bcagent/google/` (readable only by you). bcagent asks for Drive access because Colab
+notebooks are Drive files, and it only opens the notebooks you link. For a notebook on GitHub, or one
+you can only view, choose **File ▸ Save a copy in Drive** in Colab and link the copy.
+
 ## Project layout
 
 ```
@@ -215,6 +316,8 @@ bcagent/
     ├── project.py    file tree, BCAGENT.md memory, choosing relevant files for context
     ├── agents.py     built-in agent, catalog, installing custom agents
     ├── mcp.py        MCP client, public server catalog, ~/.bcagent/mcp.json
+    ├── git.py        /git and /github: git commands, GitHub sign-in, repos and pull requests
+    ├── colab.py      Google Colab: guided Google sign-in, Drive API, notebook ↔ `# %%` file sync
     ├── llm.py        Ollama client (Python standard library only, streaming)
     ├── ui.py         Bellevue College Blue theme, Bulldog banner, diffs, menus
     ├── update.py     self-update: checks GitHub for new versions and upgrades in place
