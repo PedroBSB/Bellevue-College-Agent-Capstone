@@ -12,7 +12,7 @@ from rich.markup import escape
 from rich.progress import BarColumn, DownloadColumn, Progress, TextColumn, TransferSpeedColumn
 from rich.table import Table
 
-from . import __version__, actions as actions_mod, agents as agents_mod, colab as colab_mod, git as git_mod, packages as packages_mod, report as report_mod, mcp as mcp_mod, ui, update as update_mod
+from . import __version__, actions as actions_mod, agents as agents_mod, course as course_mod, hardware as hardware_mod, colab as colab_mod, git as git_mod, packages as packages_mod, report as report_mod, mcp as mcp_mod, ui, update as update_mod
 from .agents import CATALOG, Agent, all_agents
 from .config import AGENTS_DIR, CONFIG_FILE, HISTORY_FILE, load_config, save_config
 from .llm import Ollama, OllamaError
@@ -41,6 +41,7 @@ COMMANDS = [
     ("/resume", "Continue an earlier conversation in this folder"),
     ("/bug", "Report a problem with bcagent on GitHub: /bug [what happened]"),
     ("/packages", "Check / install the default libraries (numpy, pandas, scikit-learn, statsmodels, statsformula)"),
+    ("/course", "Show the course profile your instructor set (learning mode, exam times, allowed agents)"),
     ("/run", "Run a Python file: /run [file.py] [args] (default: the last file bcagent wrote)"),
     ("/undo", "Undo the last set of file edits"),
     ("/auto", "Toggle auto-accept of edits (same as shift+tab)"),
@@ -135,6 +136,11 @@ def doctor(client: Ollama, cfg: dict) -> None:
     else:
         t.add_row("updates", "[muted]could not check (offline?)[/]")
     t.add_row("libraries", packages_mod.status(cfg))
+    ram = hardware_mod.total_ram_gb()
+    best, size = hardware_mod.recommend(ram)
+    current = cfg.get("agent", "bulldog")
+    t.add_row("suggested agent", f"{best} ({size})" + (f" for {ram:.0f} GB RAM" if ram else "") +
+              ("  [ok]✓ in use[/]" if best == current else f"  [muted]– bcagent agents install {best}[/]"))
     t.add_row("config", str(CONFIG_FILE))
     t.add_row("agents dir", str(AGENTS_DIR))
     console.print(t)
@@ -175,6 +181,7 @@ def agents_command(argv: List[str], client: Ollama, cfg: dict) -> int:
     sub = p.add_subparsers(dest="cmd")
     sub.add_parser("list", help="list installed agents")
     sub.add_parser("catalog", help="list agents you can install")
+    sub.add_parser("recommend", help="the best agent for this computer's memory")
     pi = sub.add_parser("install", help="install from catalog name, Ollama model tag, .md file or URL")
     pi.add_argument("spec")
     pi.add_argument("--name")
@@ -196,6 +203,13 @@ def agents_command(argv: List[str], client: Ollama, cfg: dict) -> int:
         print_agents(root, cfg.get("agent", "bulldog"))
     elif a.cmd == "catalog":
         print_agents(root, cfg.get("agent", "bulldog"), catalog=True)
+    elif a.cmd == "recommend":
+        ram = hardware_mod.total_ram_gb()
+        best, size = hardware_mod.recommend(ram)
+        console.print(f"This computer has {ram:.0f} GB of RAM → [bc]{best}[/] ({size} download)." if ram else
+                      f"Could not read the RAM size → [bc]{best}[/].")
+        console.print(f"[muted]Install and use it with[/] [bc]bcagent agents install {best}[/] [muted]then[/] "
+                      f"[bc]bcagent agents use {best}[/]")
     elif a.cmd == "install":
         kw = {k: getattr(a, k) for k in ("name", "model", "instructions", "edit_format", "description")}
         return 0 if install_agent(client, a.spec, **kw) else 1
@@ -604,6 +618,11 @@ def handle_slash(line: str, session: Session, client: Ollama, cfg: dict) -> bool
         console.print("[muted]Conversation cleared.[/]")
     elif cmd == "/agents":
         print_agents(proj.root, session.agent.name, catalog=(arg == "catalog"))
+    elif cmd in ("/agent", "/install", "/model") and session.course and session.course.allowed_agents and (
+            cmd == "/model" and arg or cmd != "/model" and arg and not session.course.agent_allowed(arg)):
+        console.print(f"[warn]✋ Your course profile allows only these agents:[/] "
+                      f"{', '.join(session.course.allowed_agents)}" +
+                      (" [muted](and no other models)[/]" if cmd == "/model" else ""))
     elif cmd == "/agent":
         found = all_agents(proj.root).get(arg)
         if not found:
@@ -656,6 +675,8 @@ def handle_slash(line: str, session: Session, client: Ollama, cfg: dict) -> bool
             print_mcp(proj.root, session.mcp)
         elif sub == "catalog":
             print_mcp(proj.root, catalog=True)
+        elif sub == "add" and words and session.course and not session.course.allow_mcp:
+            console.print("[warn]✋ MCP servers are turned off by your course profile.[/]")
         elif sub == "add" and words:
             project = "--project" in words
             words = [w for w in words if w not in ("--project", "--")]
@@ -694,6 +715,11 @@ def handle_slash(line: str, session: Session, client: Ollama, cfg: dict) -> bool
         session.run_tests(arg)
     elif cmd == "/review":
         session.review_code(arg)
+    elif cmd == "/learn" and session.course and session.course.learn_locked and not (arg == "on"):
+        console.print("[warn]✋ Learning mode is locked on by your course profile[/] "
+                      f"[muted]({escape(session.course.name or 'course')}). /course shows the rules.[/]")
+    elif cmd == "/course":
+        print_course(session.course)
     elif cmd == "/learn":
         session.learn = (arg == "on") or (arg != "off" and not session.learn)
         if session.learn:
@@ -735,6 +761,62 @@ def handle_slash(line: str, session: Session, client: Ollama, cfg: dict) -> bool
 
 
 EXIT_WORDS = {"quit", "exit", "q", ":q"}
+
+
+def print_course(course) -> None:
+    if not course:
+        console.print("[muted]No course profile. Instructors: see[/] [bc]bcagent course create[/]")
+        return
+    t = Table.grid(padding=(0, 2))
+    t.add_column(style="muted")
+    t.add_column()
+    t.add_row("course", f"[bc]{escape(course.name or '(unnamed)')}[/]" +
+              (f"  [muted]· {escape(course.instructor)}[/]" if course.instructor else ""))
+    t.add_row("learning mode", {"off": "off", "on": "on (you can turn it off with /learn)",
+                                "locked": "[bold]locked on[/]"}[course.learn_mode])
+    t.add_row("agents", ", ".join(course.allowed_agents) if course.allowed_agents else "any")
+    t.add_row("MCP tools", "allowed" if course.allow_mcp else "turned off")
+    t.add_row("session log", "saved automatically in bcagent-logs/" if course.session_log == "auto" else "off")
+    if course.exam_start and course.exam_end:
+        state = ("[warn]now[/]" if course.exam_active() else
+                 "[muted]over[/]" if datetime.now() > course.exam_end else "[muted]upcoming[/]")
+        t.add_row("exam", f"{course.exam_start:%b %d %H:%M} – {course.exam_end:%H:%M} ({state}) · " +
+                  ("no AI help" if course.exam_mode == "blocked" else "hints about errors and concepts only"))
+    t.add_row("profile", f"{ui.shorten(Path(course.source))} · fingerprint {course.fingerprint}")
+    console.print(t)
+    if course.notes:
+        console.print("[muted]notes for the agent:[/] " + escape(course.notes.splitlines()[0][:100]) +
+                      (" …" if len(course.notes) > 100 or "\n" in course.notes else ""))
+
+
+def course_command(argv: List[str]) -> int:
+    sub = argv[0] if argv else "show"
+    root = Path.cwd()
+    try:
+        if sub == "show":
+            print_course(course_mod.load(root))
+        elif sub == "create":
+            path = course_mod.create(root)
+            console.print(f"[ok]✓[/] course profile: [bc]{path}[/]\n  [muted]Edit it, commit it with the assignment's "
+                          "starter files, and every student who runs bcagent in that folder gets these rules. "
+                          "Check it with[/] [bc]bcagent course show[/]")
+        elif sub == "install" and len(argv) > 1:
+            path = course_mod.install(argv[1])
+            console.print(f"[ok]✓[/] installed for every project on this computer: [bc]{path}[/]")
+            print_course(course_mod.load(root))
+        elif sub == "remove":
+            existed = course_mod.USER_FILE.exists()
+            if existed:
+                course_mod.USER_FILE.unlink()
+            console.print("[ok]✓[/] removed the computer-wide course profile" if existed else
+                          "[muted]No computer-wide course profile (a project's .bcagent/course.md stays).[/]")
+        else:
+            console.print("usage: bcagent course [show | create | install <file.md|url> | remove]")
+            return 2
+    except (OSError, ValueError) as e:
+        console.print(f"[err]✗ {e}[/]")
+        return 1
+    return 0
 
 
 def resume(session: Session, pick: bool) -> bool:
@@ -793,7 +875,8 @@ def run_request(line: str, session: Session, client: Ollama, cfg: dict) -> None:
 
 
 def repl(session: Session, client: Ollama, cfg: dict, first: Optional[str]) -> None:
-    ui.welcome(session.project.root, session.agent.name, session.agent.model)
+    ui.welcome(session.project.root, session.agent.name, session.agent.model,
+               course=session.course.summary() if session.course else "")
     read = make_prompt(session) if ui.is_interactive() else (lambda: input("> "))
     pending = first
     while True:
@@ -863,6 +946,8 @@ def main(argv: Optional[List[str]] = None) -> None:
     if argv and argv[0] == "doctor":
         doctor(client, cfg)
         return
+    if argv and argv[0] == "course":
+        sys.exit(course_command(argv[1:]))
     if argv and argv[0] == "packages":
         sys.exit(packages_mod.command(argv[1:]))
     if argv and argv[0] == "bug":
@@ -903,9 +988,34 @@ def main(argv: Optional[List[str]] = None) -> None:
     agents = all_agents(project.root)
     name = a.agent or cfg.get("agent", "bulldog")
     agent = agents.get(name)
+    try:
+        course = course_mod.load(project.root)
+    except (OSError, ValueError):
+        course = None
+    if agent is None and course and course.allowed_agents and not course.agent_allowed(name):
+        agent = agents.get("bulldog")  # replaced below by the course profile's agent
     if agent is None:
         console.print(f"[err]✗ unknown agent '{name}'[/] – see [bc]bcagent agents list[/]")
         sys.exit(1)
+    if course and course.allowed_agents:
+        if a.model:
+            console.print("[warn]✋ -m is turned off by your course profile[/] [muted](it allows the agents "
+                          f"{', '.join(course.allowed_agents)})[/]")
+            a.model = None
+        if not course.agent_allowed(agent.name) or not course.agent_allowed(name):
+            want = course.default_agent if course.agent_allowed(course.default_agent or "-") else \
+                course.allowed_agents[0]
+            if a.agent or name != "bulldog":
+                console.print(f"[warn]✋ Your course profile doesn't allow the agent {name}; using {want}.[/]")
+            agent = agents.get(want)
+            if agent is None and want in CATALOG:
+                agent = install_agent(client, want)
+            if agent is None:
+                console.print(f"[err]✗ the course profile's agent '{want}' is not installed[/] – run "
+                              f"[bc]bcagent agents install {want}[/]")
+                sys.exit(1)
+    elif course and course.default_agent and not a.agent and course.default_agent in agents:
+        agent = agents[course.default_agent]
     if a.model:
         agent = Agent(agent.name, a.model, agent.description, agent.instructions,
                       agent.edit_format, agent.temperature, "cli")
@@ -930,6 +1040,11 @@ def main(argv: Optional[List[str]] = None) -> None:
         session.learn = True
     if a.cont or a.resume:
         resume(session, pick=a.resume)
+    if not a.print_mode and not a.agent and not a.model:
+        try:
+            hardware_mod.maybe_suggest(session, cfg, client)
+        except Exception:  # a suggestion must never stop bcagent from starting
+            pass
     if a.colab:
         rel = colab_link(session.colab, a.colab, session)
         if not rel:
@@ -948,6 +1063,7 @@ def main(argv: Optional[List[str]] = None) -> None:
             sys.exit(1)
         finally:
             session.mcp.close()
+            session.autosave_log()
         return
     try:
         repl(session, client, cfg, prompt)
@@ -955,6 +1071,9 @@ def main(argv: Optional[List[str]] = None) -> None:
         console.print("\n[bc]Go Bulldogs! 🐾[/]")
     finally:
         session.mcp.close()
+        saved = session.autosave_log()
+        if saved:
+            console.print(f"[muted]Session log saved to {session.project.rel(saved)} (course profile)[/]")
     sys.exit(0)
 
 

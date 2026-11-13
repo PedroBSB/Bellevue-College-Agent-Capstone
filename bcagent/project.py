@@ -8,6 +8,7 @@ from pathlib import Path
 from typing import List, Tuple
 
 from .config import HOME
+from .sections import render, select
 
 IGNORE_DIRS = {
     ".git", ".hg", ".svn", "node_modules", "__pycache__", ".venv", "venv", "env", ".tox",
@@ -50,6 +51,7 @@ class Project:
         self.pinned: List[str] = []
         self.truncated: dict = {}   # files shown only partly in the last prompt: {path: (shown, total) lines}
         self.seen: set = set()      # files the model has seen in full (or written) this session
+        self.sections: dict = {}    # big .py files shown as only the named functions: {path: [names]}
 
     # -- paths ----------------------------------------------------------------
     def rel(self, p: Path) -> str:
@@ -204,6 +206,7 @@ class Project:
         used = sum(len(p) for p in parts)
         included: List[str] = []
         self.truncated = {}
+        self.sections = {}
         for f in self.relevant(prompt):
             if not self.is_text(f):
                 continue
@@ -212,7 +215,12 @@ class Project:
             except OSError:
                 continue
             limit = max(1500, budget - used - 200)
-            if len(full) > limit:
+            picked = select(full, prompt) if len(full) > limit and f.endswith(".py") else []
+            view = render(full, picked) if picked else ""
+            if picked and len(view) <= limit:
+                body = view   # only the functions/classes the request names
+                self.sections[f] = [d.name for d in picked]
+            elif len(full) > limit:
                 body = full[:limit] + "\n... (truncated)\n"
                 self.truncated[f] = (full[:limit].count("\n"), full.count("\n") + 1)
             else:

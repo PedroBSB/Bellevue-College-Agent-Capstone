@@ -33,7 +33,7 @@ never leaves your machine unless you push it to GitHub yourself.
 5. [All commands, with examples](#all-commands-with-examples)
 6. [Agents: what they are, choosing one, creating your own](#agents)
 7. [MCP: giving the agent new tools](#mcp-giving-the-agent-new-tools)
-8. [For students and instructors](#for-students-and-instructors)
+8. [For students and instructors](#for-students-and-instructors), including [course profiles](#course-profiles-for-instructors)
 9. [Data science: built-in libraries and notebooks](#data-science-built-in-libraries-and-notebooks)
 10. [Git and GitHub](#git-and-github)
 11. [Google Colab](#google-colab)
@@ -293,6 +293,7 @@ offers the commit. Questions (*"how do I push to GitHub?"*) always go to the age
 | `/github …` | GitHub: login, ssh, create, pr, prs, open | `/github create` |
 | `/colab …` | Google Colab notebooks: link, pull, push, open … | `/colab <url>` |
 | `/packages` | check / install the default libraries | `/packages` |
+| `/course` | show the course profile your instructor set | `/course` |
 | `/bug [what happened]` | report a problem with bcagent on GitHub | `/bug the diff colors are wrong` |
 | `/auto` | auto-accept edits on/off (same as shift+tab) | `/auto` |
 | `/clear` | forget the conversation (start fresh) | `/clear` |
@@ -318,6 +319,8 @@ offers the commit. Questions (*"how do I push to GitHub?"*) always go to the age
 | `bcagent git <command>` / `bcagent github <command>` | [git and GitHub](#git-and-github) without a session |
 | `bcagent colab login\|list\|link\|pull\|push` | [Colab](#google-colab) without a session |
 | `bcagent packages [list]` | check / install the default libraries |
+| `bcagent agents recommend` | the best agent for this computer's memory |
+| `bcagent course show\|create\|install <file\|url>\|remove` | [course profiles](#course-profiles-for-instructors) for instructors |
 | `bcagent doctor` | check the installation |
 | `bcagent update [--to X.Y.Z \| --list]` | update or roll back |
 | `bcagent bug "what went wrong"` | report a problem |
@@ -378,8 +381,17 @@ installs one. Example of using two agents in a row:
 > /test
 ```
 
-**Which one should I use?** Start with `bulldog`. If answers are wrong or it struggles with
-bigger files, try `bulldog-1.5b`, then `bulldog-3b` (if your computer has 8 GB of RAM or more).
+**Which one should I use?** bcagent can tell you: `bcagent agents recommend` looks at your
+computer's memory and suggests the best agent it can run comfortably. On first start it also offers
+the recommended agent once. It never switches without asking.
+
+| Memory (RAM) | Suggested agent |
+|--------------|-----------------|
+| under 6 GB | `bulldog` (0.5B) |
+| 6–12 GB | `bulldog-1.5b` |
+| 12–24 GB | `bulldog-3b` |
+| 24 GB or more | `bulldog-7b` |
+
 Use `explainer` when you want to understand, not change, code.
 
 Any model on [ollama.com/library](https://ollama.com/library) works too:
@@ -414,7 +426,8 @@ You help students with statistics in Python.
 - Always print the model summary and check for missing values first.
 ```
 
-Then: `bcagent -a statsdog "regress score on hours_studied in grades.csv"`.
+Then: `bcagent -a statsdog "regress score on hours_studied in grades.csv"`. This file is also in
+[`examples/statsdog.md`](examples/statsdog.md): `bcagent agents install examples/statsdog.md`.
 
 **Example 2: a Flask web-app builder:**
 
@@ -537,7 +550,7 @@ if __name__ == "__main__":
     mcp.run()
 ```
 
-Add it and use it:
+Add it and use it (the file is also in [`examples/grades_server.py`](examples/grades_server.py)):
 
 ```bash
 bcagent mcp add grades -- python grades_server.py
@@ -564,6 +577,7 @@ API, read sensor data, or search your notes.
 | `/test` | Runs **pytest**. If tests fail, it offers to let the agent fix **your code**. It never changes the tests to make them pass. Then it runs them again, up to 3 rounds. It installs pytest if needed and offers to write tests if there are none. |
 | `/export [file.md]` | Saves a **session log**: every prompt, answer, applied edit (with diff) and command with its result. Students can hand it in with an assignment to show how they used AI. |
 | `/resume`, `bcagent -c` | Continue an earlier conversation in this folder (the last 10 are kept). |
+| `/course` | Shows the rules your instructor set in a [course profile](#course-profiles-for-instructors). |
 
 Example, learning mode:
 
@@ -575,6 +589,117 @@ Example, learning mode:
   Hint: check what the function should return for an empty list before dividing.
   Question: what does your program do if the user enters no numbers at all?
 ```
+
+### Course profiles (for instructors)
+
+A **course profile** is one small text file in which an instructor decides how bcagent behaves for
+a class. You don't need to know anything about AI models to write one. With a profile you can:
+
+- turn **learning mode** on (hints instead of solutions) and **lock** it, so students can't turn
+  it off;
+- set an **exam window** during which bcagent gives **no AI help at all**, or only explains error
+  messages and Python concepts;
+- choose **which agents** students may use (and block other models);
+- turn **MCP tools** (web pages and other outside tools) on or off;
+- **save a log of every session automatically**, which students hand in with their work;
+- give the agent **notes about your course or assignment**, e.g. *"students haven't learned
+  classes yet, don't use them"*.
+
+#### Step 1: create the profile
+
+In the folder with your assignment's starter files, run:
+
+```bash
+bcagent course create        # writes .bcagent/course.md with every setting explained
+```
+
+Open `.bcagent/course.md` in any text editor. The part between the `---` lines holds the
+settings, and everything below them is the notes for the agent:
+
+```markdown
+---
+course: CS 110 – Introduction to Python
+instructor: Prof. Rivera
+learn_mode: locked
+allowed_agents: bulldog, explainer, tester
+default_agent: bulldog
+allow_mcp: false
+session_log: auto
+exam_start: 2026-12-10 09:00
+exam_end: 2026-12-10 11:00
+exam_mode: blocked
+---
+This is an introductory course. Use only loops, lists, dictionaries and functions.
+Students have not learned classes or list comprehensions yet: don't use them.
+Explain like you would to a first-year student.
+```
+
+| Setting | Values | What it does |
+|---------|--------|--------------|
+| `course`, `instructor` | any text | shown on the welcome screen, in `/course` and in every session log |
+| `learn_mode` | `off` · `on` · `locked` | `on`: sessions start in [learning mode](#for-students-and-instructors) (hints, no edits), and students may turn it off with `/learn`. `locked`: always on. `off`: normal bcagent |
+| `allowed_agents` | comma-separated names | the only agents students may use. `-m`, `/model` and other agents are refused. Empty = any agent |
+| `default_agent` | an agent name | the agent sessions start with (installed automatically if it is in the catalog) |
+| `allow_mcp` | `true` · `false` | `false` turns MCP servers off, so there's no web access through tools |
+| `session_log` | `auto` · `off` | `auto`: when bcagent exits, a log of the session is saved in `bcagent-logs/` |
+| `exam_start`, `exam_end` | `YYYY-MM-DD HH:MM` (local time) | the exam window. Empty = no exam |
+| `exam_mode` | `blocked` · `hints` | during the window, `blocked` means no AI help at all, and `hints` means it only explains error messages and Python concepts, without code for the task. git, `/run` and `/test` keep working |
+| notes (below the `---`) | free text | sent to the agent with every request (up to ~3000 characters) |
+
+Check the result with `bcagent course show` or `/course`:
+
+```
+course          CS 110 – Introduction to Python  · Prof. Rivera
+learning mode   locked on
+agents          bulldog, explainer, tester
+MCP tools       turned off
+session log     saved automatically in bcagent-logs/
+exam            Dec 10 09:00 – 11:00 (upcoming) · no AI help
+profile         ~/cs110/lab3/.bcagent/course.md · fingerprint 3f9a1c0b7e2d
+```
+
+#### Step 2: give it to your students
+
+- **With the assignment (recommended):** keep `.bcagent/course.md` in the assignment's starter
+  repository, zip file or GitHub Classroom template. Every student who runs bcagent in that folder
+  gets the rules, and different assignments can have different profiles.
+- **On lab computers:** `bcagent course install course.md` (or a link:
+  `bcagent course install https://…/course.md`) installs the profile for *every* folder on that
+  computer, in `~/.bcagent/course.md`. A project's own profile wins over it.
+  `bcagent course remove` uninstalls it.
+
+#### What students see
+
+The welcome screen shows the course (`course: CS 110 – Introduction to Python · learning mode
+(locked)`). Requests that the profile doesn't allow are refused politely. For example, during an
+exam with `exam_mode: blocked`:
+
+```
+> fix my code
+✋ AI help is turned off during the exam (until 11:00, set by your instructor in the course profile).
+  git, /run and /test still work.
+```
+
+Other refusals: `/learn off` with a locked learning mode, `/agent bulldog-7b` or `/model …` when
+only some agents are allowed, and `/mcp add …` with `allow_mcp: false`.
+
+#### Step 3: collect session logs
+
+With `session_log: auto`, every session ends with
+`Session log saved to bcagent-logs/bcagent-session-20261113-142233.md`. Ask students to submit that
+folder with their work, for example by committing it (`commit my changes` does that) or by
+uploading it to your learning management system. Each log lists every prompt, every answer, every
+edit with its diff, and every command with its result. It also records the course name and the
+profile's **fingerprint**, a short code that changes whenever the profile file changes. If the
+fingerprint in a student's log isn't the one `bcagent course show` prints for your file, the
+student used a different or edited profile.
+
+> **Honest limits:** a course profile *guides* students; it isn't proctoring software. A student who
+> deletes the file, or uses another AI tool, isn't stopped. Treat it like a class policy that the
+> tool helps students follow and that the logs make visible.
+
+Ready-made profiles in [`examples/`](examples/): an intro course (hints instead of answers), an exam
+day (AI off for two hours), and a statistics course with its own agent.
 
 ---
 
@@ -713,9 +838,11 @@ only view, choose **File ▸ Save a copy in Drive** in Colab and link the copy.
   GitHub, Google Colab, MCP servers that fetch web pages, and bug reports you choose to send.
 - **You approve every change** to your files and every command (unless you turn on auto-accept).
   `/undo` reverts the last change, and bcagent never writes outside the folder you started it in.
-- **Big files are protected.** Small models see only part of a long file. If the agent tries to
-  rewrite a file it saw only partly, which would delete the rest, bcagent refuses and suggests what
-  to do. The same happens when it would shrink a file it never saw.
+- **Big files are edited one function at a time.** Small models can't see a long file all at once.
+  When your request names a function or class (*"fix load_data in @big.py"*), bcagent shows the
+  model only that part, and the model sends back just the new version. bcagent then puts it into
+  the full file, so everything else stays exactly as it was. If the agent ever tries to rewrite a
+  long file it saw only partly, which would delete the rest, bcagent refuses.
 - **Tests stay honest.** While fixing failing tests, bcagent doesn't let the model edit the test
   files.
 - **Secrets stay private.** Secret-looking files aren't committed without your confirmation, and
@@ -736,7 +863,8 @@ bcagent opens a pre-filled issue page in your browser. Report something yourself
 
 ## Updates
 
-bcagent updates itself. When it starts, it checks the latest
+New installs and updates both use the latest **release**, never untested code. bcagent updates
+itself: when it starts, it checks the latest
 [release](https://github.com/PedroBSB/Bellevue-College-Agent-Capstone/releases) (at most every 6 hours,
 3-second limit, so being offline doesn't slow it down). When a newer one exists, it upgrades and
 restarts. Every release must first pass the automated tests on macOS, Linux and Windows.
@@ -768,6 +896,7 @@ Settings live in `~/.bcagent/config.json` (on Windows `%USERPROFILE%\.bcagent\co
 | `bug_reports` | `true` | offer to report internal errors |
 | `auto_update` | `true` | update automatically |
 | `pinned_version` | – | set by `bcagent update --to`; pauses automatic updates |
+| `recommend_asked` | – | set once bcagent has suggested an agent for your computer |
 
 | Environment variable | Effect |
 |----------------------|--------|
@@ -786,7 +915,7 @@ Settings live in `~/.bcagent/config.json` (on Windows `%USERPROFILE%\.bcagent\co
 | `bcagent: command not found` | open a **new** terminal (the installer added it to your PATH), or run `~/.local/bin/bcagent` |
 | "Ollama is not running" | start the Ollama app (or run `ollama serve`), then `bcagent doctor` |
 | answers are wrong or ignore your file | mention the file with `@file.py`; keep requests small; try `bcagent -a bulldog-3b` |
-| "Not applied … the file is too long" | ask about one function (*"fix load_data in @big.py"*), or use `bulldog-3b`, which makes small edits |
+| "Not applied … the file is too long" | name the function or class you want changed (*"fix load_data in @big.py"*); bcagent then edits just that part |
 | "No module named …" when running code | accept bcagent's offer to install it, or run `bcagent packages` |
 | the agent doesn't use MCP tools | use a bigger agent (`bulldog-3b`+) and say *"use the … tool"* |
 | push fails with "Permission denied (publickey)" | `/github ssh` (or switch to HTTPS when bcagent offers) |
@@ -800,11 +929,16 @@ Settings live in `~/.bcagent/config.json` (on Windows `%USERPROFILE%\.bcagent\co
 ```bash
 git clone https://github.com/PedroBSB/Bellevue-College-Agent-Capstone.git && cd Bellevue-College-Agent-Capstone
 python -m venv .venv && .venv/bin/pip install -e . pytest
-.venv/bin/python -m pytest -q tests     # ~70 tests, offline; never touches your accounts or ~/.ssh
+.venv/bin/python -m pytest -q tests     # ~85 tests, offline; never touches your accounts or ~/.ssh
 ```
 
+CI runs two workflows. `tests` runs the test suite on macOS, Linux and Windows. `installers` runs
+the real installers on fresh macOS, Ubuntu and Windows machines, and in a bare Ubuntu container with
+no Python and a student account without admin rights. That second workflow also runs every Monday
+to catch changes in Ollama, Python or PyPI.
+
 **Releasing:** bump the version in `bcagent/__init__.py` and `pyproject.toml`, commit, then
-`git tag v1.6.0 && git push origin main v1.6.0`. The `release` workflow runs the tests on macOS,
+`git tag v1.7.0 && git push origin main v1.7.0`. The `release` workflow runs the tests on macOS,
 Linux and Windows, checks that the tag matches the version, and publishes the GitHub release.
 Installed copies update only after that.
 
@@ -813,13 +947,17 @@ bcagent/
 ├── install.sh / install.ps1 / install.bat    installers (macOS+Linux / Windows)
 ├── uninstall.sh / uninstall.bat
 ├── pyproject.toml
+├── examples/                                 course profiles, a custom agent and an MCP server to copy
 ├── tests/                                    pytest suite (CI on macOS, Linux and Windows)
-├── .github/workflows/                        ci.yml (tests) · release.yml (tag vX.Y.Z → tested release)
+├── .github/workflows/                        ci.yml (tests) · installers.yml · release.yml (tag vX.Y.Z → tested release)
 └── bcagent/
     ├── cli.py        command line, interactive prompt, slash commands, subcommands
     ├── session.py    the agent loop: prompt → model → edits → approval → check → repair; /test /review /export
     ├── edits.py      turns the model's answer into file edits and shell commands
     ├── project.py    file tree, BCAGENT.md notes, picking relevant files, notebook view
+    ├── sections.py   big files: show only the named functions, splice the model's new versions back
+    ├── course.py     course profiles for instructors (learning mode lock, exams, allowed agents, logs)
+    ├── hardware.py   memory detection and the recommended agent
     ├── agents.py     built-in agent, catalog, installing and creating agents
     ├── actions.py    plain-language requests → built-in actions (commit, push, tests, colab…)
     ├── mcp.py        MCP client, public server catalog, ~/.bcagent/mcp.json

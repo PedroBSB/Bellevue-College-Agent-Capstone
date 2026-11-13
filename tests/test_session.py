@@ -13,7 +13,7 @@ def test_whole_rewrite_of_truncated_file_is_blocked(make_session):
     s = make_session("FILE: big.py\n```python\ndef f0():\n    return 0\n```\n")
     original = big_file()
     (s.project.root / "big.py").write_text(original)
-    s.turn("change f0 in @big.py")
+    s.turn("clean up @big.py")
     assert "big.py" in s.project.truncated
     assert (s.project.root / "big.py").read_text(encoding="utf-8") == original, "nothing deleted"
     assert any(e["kind"] == "blocked" for e in s.events)
@@ -23,7 +23,7 @@ def test_whole_rewrite_of_truncated_file_is_blocked(make_session):
 def test_truncated_file_hint_tells_model(make_session):
     s = make_session("Sure.")
     (s.project.root / "big.py").write_text(big_file())
-    s.turn("change f0 in @big.py")
+    s.turn("clean up @big.py")
     assert "too long and was only partly shown" in s.client.prompts[0][-1]["content"]
 
 
@@ -104,7 +104,7 @@ def test_guard_covers_code_saved_without_file_line(make_session):
     s = make_session("Here you go:\n```python\ndef f0():\n    return 100\n" + "# filler\n" * 5 + "```\n")
     original = big_file()
     (s.project.root / "big.py").write_text(original)
-    s.turn("make f0 in @big.py return 100")
+    s.turn("make @big.py faster")
     assert (s.project.root / "big.py").read_text(encoding="utf-8") == original
 
 
@@ -140,3 +140,15 @@ def test_pytest_startup_crash_is_not_sent_to_model(make_session, monkeypatch):
     monkeypatch.setattr("bcagent.session.run_command", fake_run)
     assert s.run_tests() is False
     assert calls == [{}, {"PYTEST_DISABLE_PLUGIN_AUTOLOAD": "1"}] and not s.client.prompts
+
+
+def test_big_file_function_edit_is_spliced(make_session):
+    s = make_session("FILE: big.py\n```python\ndef f7():\n    return 700\n\n\ndef helper():\n    return 1\n```\n")
+    (s.project.root / "big.py").write_text(big_file() + 'if __name__ == "__main__":\n    print(f7())\n')
+    s.turn("make f7 in @big.py return 700 and add a helper")
+    assert s.project.sections == {"big.py": ["f7"]}
+    prompt = s.client.prompts[0][-1]["content"]
+    assert "def f7" in prompt and "def f2999" not in prompt and "only f7 is shown" in prompt
+    text = (s.project.root / "big.py").read_text(encoding="utf-8")
+    assert "return 700" in text and "def f2999" in text and text.count("def f") == 3000
+    assert text.index("def helper") < text.index("if __name__")

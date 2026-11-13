@@ -21,7 +21,7 @@ from rich.markdown import Markdown
 from rich.markup import escape
 from rich.text import Text
 
-from . import packages as packages_mod, ui
+from . import course as course_mod, packages as packages_mod, ui
 from .agents import Agent
 from .config import HOME
 from .colab import ColabError, ColabSync, check_source
@@ -71,6 +71,13 @@ class Session:
         self.last_python: Optional[str] = None  # last .py file bcagent created or changed (for /run)
         self.colab = ColabSync(project.root)    # Colab notebooks linked with /colab
         self.learn = bool(cfg.get("learn_mode")) or bool(os.environ.get("BCAGENT_LEARN"))  # hints, no edits
+        try:
+            self.course = course_mod.load(project.root)   # instructor's course profile, if any
+        except (OSError, ValueError) as e:
+            ui.err_console.print(f"[warn]⚠ the course profile could not be read: {escape(str(e))}[/]")
+            self.course = None
+        if self.course and self.course.learn_mode != "off":
+            self.learn = True
         self.no_edits = False                   # one turn without edits (/review)
         self.last_error = None                  # (exception, input) of the last internal error, for /bug
         self.protect_tests = False              # while fixing failing tests: don't let the model edit tests
@@ -81,7 +88,21 @@ class Session:
     # -- modes ----------------------------------------------------------------
     @property
     def edit_format(self) -> str:
-        return "none" if (self.learn or self.no_edits) else self.agent.edit_format
+        return "none" if (self.learn or self.no_edits or self.exam_hints) else self.agent.edit_format
+
+    @property
+    def exam_hints(self) -> bool:
+        return bool(self.course and self.course.exam_active() and not self.course.exam_blocked())
+
+    def autosave_log(self) -> Optional[Path]:
+        """Course profiles with `session_log: auto`: save the log in bcagent-logs/ when bcagent exits."""
+        if not (self.course and self.course.session_log == "auto") or not any(
+                e["kind"] == "prompt" for e in self.events):
+            return None
+        try:
+            return self.export(f"bcagent-logs/bcagent-session-{self.session_id}.md")
+        except (OSError, ValueError):
+            return None
 
     def log(self, kind: str, text: str, **extra) -> None:
         self.events.append({"time": datetime.now().strftime("%H:%M:%S"), "kind": kind, "text": text, **extra})
@@ -89,6 +110,9 @@ class Session:
     def start_mcp(self) -> None:
         """Connect to the configured MCP servers (first turn only)."""
         if self.mcp.started or not self.mcp.servers():
+            return
+        if self.course and not self.course.allow_mcp:
+            self.mcp.started = True   # the course profile turns MCP tools off
             return
         if self.print_mode:
             self.mcp.start()
@@ -139,6 +163,12 @@ class Session:
                          "with `# `. Keep the cell lines, add new cells with `# %%`, and use `!pip install` "
                          "for packages. Change the notebook by writing the whole file as `FILE: " + notebooks[0] +
                          "`." + (" bcagent uploads it to Colab after the user approves." if kind != "Jupyter" else ""))
+            parts = [f for f in dict.fromkeys(targets + self.project.pinned) if f in self.project.sections]
+            for f in parts:
+                hint += (f"\nIMPORTANT: {f} is long, so only " + ", ".join(self.project.sections[f]) +
+                         " is shown. To change it, write `FILE: " + f + "` and then ONLY the complete new "
+                         "version of the function(s) or class(es) you change or add, in one code block. "
+                         "Do not write the rest of the file: bcagent puts your code into the file.")
             big = [f for f in targets + self.project.pinned if f in self.project.truncated]
             if big and self.edit_format == "whole":
                 hint += ("\nIMPORTANT: " + ", ".join(dict.fromkeys(big)) + " is too long and was only partly "
@@ -147,13 +177,18 @@ class Session:
             elif self.edit_format == "whole":
                 hint += "\nAnswer with `FILE: <path>` followed by the COMPLETE updated file in a code block."
         user = f"{ctx}\n\n{notes}Task: {prompt}{hint}"
-        if self.learn or self.no_edits:
+        if self.edit_format == "none" and self.agent.edit_format != "none":
             system = Agent(self.agent.name, self.agent.model, edit_format="none",
                            instructions=self.agent.instructions).system_prompt()
-            if self.learn:
-                system += "\n\n" + LEARN_RULES
         else:
             system = self.agent.system_prompt()
+        if self.exam_hints:
+            system += "\n\n" + course_mod.EXAM_HINT_RULES
+        elif self.learn:
+            system += "\n\n" + LEARN_RULES
+        if self.course and self.course.notes:
+            system += (f"\n\nNotes from the instructor of {self.course.name or 'this course'} "
+                       f"(follow them):\n{self.course.notes[:3000]}")
         libs = packages_mod.wanted(self.cfg)
         if libs:
             system += "\n\n" + packages_mod.PROMPT_NOTE.format(
@@ -195,6 +230,8 @@ class Session:
             interrupted = True
             gen.close()
         text = "".join(buf).strip()
+        if self.learn or self.exam_hints:
+            text = hide_solutions(text, 2 if self.exam_hints else 3)
         if self.print_mode:
             print(text)
         else:
@@ -208,6 +245,13 @@ class Session:
 
     # -- main turn ------------------------------------------------------------
     def turn(self, prompt: str, repair: int = 0, tool_rounds: int = 0) -> None:
+        if self.course and self.course.exam_blocked():
+            out = console if not self.print_mode else ui.err_console
+            out.print(f"[warn]✋ AI help is turned off during the exam[/] [muted](until "
+                      f"{self.course.exam_end:%H:%M}, set by your instructor in the course profile). "
+                      "git, /run and /test still work.[/]")
+            self.log("blocked", f"exam mode: request not sent to the model: {prompt[:200]}")
+            return
         self.start_mcp()
         text, interrupted = self.generate(self.build_messages(prompt))
         self.history += [{"role": "user", "content": prompt}, {"role": "assistant", "content": text}]
@@ -232,6 +276,7 @@ class Session:
                 return self.turn(chat)
             if e:
                 edits = [e]
+        self.splice_sections(edits)
         blocked = self.guard(edits)
         applied, feedback = self.review(edits)
         if feedback:
@@ -255,6 +300,21 @@ class Session:
                        "\nFix them. Write the COMPLETE corrected file(s) using `FILE: path` and a code block.")
                 return self.turn(fix, repair + 1)
         self.offer_commands(commands + self.run_suggestions(applied, commands, problems))
+
+    def splice_sections(self, edits: List[Edit]) -> None:
+        """Big files shown as single functions: put the model's functions back into the full file."""
+        from .sections import splice
+        for e in edits:
+            if e.error or e.is_new or not e.whole or e.path not in self.project.sections:
+                continue
+            new, replaced, added, err = splice(e.old or "", e.new)
+            if err:
+                e.error, e.blocked = (f"bcagent couldn't put the change into the long file ({err})"), True
+                continue
+            e.new, e.whole = new, False
+            what = ([f"changed {', '.join(replaced)}"] if replaced else []) + \
+                   ([f"added {', '.join(added)}"] if added else [])
+            e.warning = "only " + " and ".join(what) + " – the rest of the file is unchanged"
 
     # -- safety: never let a whole-file rewrite delete code the model didn't see ---------
     def guard(self, edits: List[Edit]) -> List[Edit]:
@@ -634,6 +694,7 @@ class Session:
         if not name.endswith(".md"):
             name += ".md"
         path = self.project.resolve(name)
+        path.parent.mkdir(parents=True, exist_ok=True)
         prompts = sum(1 for e in self.events if e["kind"] == "prompt")
         edits = sum(1 for e in self.events if e["kind"] == "edit")
         lines = [f"# bcagent session log",
@@ -642,6 +703,9 @@ class Session:
                  f"- Project: {self.project.root.name}",
                  f"- bcagent v{__version__} · agent {self.agent.name} · model {self.agent.model} (local)",
                  f"- Learning mode: {'on' if self.learn else 'off'}",
+                 f"- Course profile: {self.course.name or '(unnamed)'} · instructor {self.course.instructor or '–'} · "
+                 f"fingerprint `{self.course.fingerprint}` · {'project' if '.bcagent' in self.course.source and str(self.project.root) in self.course.source else 'this computer'}"
+                 if self.course else "- Course profile: none",
                  f"- {prompts} prompt(s), {edits} file edit(s) applied",
                  ""]
         for e in self.events:
@@ -705,6 +769,21 @@ class Session:
         console.print(f"[ok]✓[/] resumed the session from "
                       f"{datetime.fromtimestamp(data.get('saved', 0)).strftime('%b %d %H:%M')} "
                       f"({len(self.history) // 2} exchange(s)). Last request: [bc]{escape(last[:100])}[/]")
+
+
+def hide_solutions(text: str, max_lines: int = 3) -> str:
+    """Learning mode: small models often ignore "don't write the solution". bcagent enforces it by
+    hiding code blocks that define functions or classes or are longer than max_lines, so students
+    get the hint, not the answer. Tiny snippets (`len(x)`, one import) stay."""
+    def sub(m):
+        body = m.group(2)
+        n = len([l for l in body.splitlines() if l.strip()])
+        defines = re.search(r"^\s*(?:async\s+)?(?:def|class)\s+\w", body, re.M)
+        if n <= max_lines and not defines:
+            return m.group(0)
+        return (f"_[bcagent hid {n} lines of code – learning mode is on. Try writing it yourself; ask for a "
+                f"hint about the step you're stuck on.]_")
+    return re.sub(r"(```[^\n]*\n)(.*?)```", sub, text, flags=re.S)
 
 
 def is_test_file(path: str) -> bool:

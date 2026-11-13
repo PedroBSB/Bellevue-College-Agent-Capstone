@@ -320,7 +320,14 @@ if [ -f "$SCRIPT_DIR/pyproject.toml" ] && [ -d "$SCRIPT_DIR/bcagent" ]; then
   say "Installing bcagent and its requirements from $SCRIPT_DIR"
   "$VPY" -m pip install --quiet --upgrade "$SCRIPT_DIR"
 else
-  say "Installing bcagent and its requirements from GitHub"
+  # the latest tested release (github.com/<repo>/releases/latest redirects to .../tag/vX.Y.Z)
+  TAG="$(curl -fsSIL -o /dev/null -w '%{url_effective}' "https://github.com/PedroBSB/Bellevue-College-Agent-Capstone/releases/latest" 2>/dev/null | sed -n 's#.*/releases/tag/##p')"
+  if [ -n "$TAG" ] && [ -z "${BCAGENT_INSTALL_MAIN:-}" ]; then
+    REPO_ZIP="https://github.com/PedroBSB/Bellevue-College-Agent-Capstone/archive/refs/tags/$TAG.zip"
+    say "Installing bcagent $TAG and its requirements from GitHub"
+  else
+    say "Installing bcagent and its requirements from GitHub (main branch)"
+  fi
   "$VPY" -m pip install --quiet --upgrade "$REPO_ZIP"
 fi
 mkdir -p "$BIN_DIR"

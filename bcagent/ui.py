@@ -188,7 +188,7 @@ def shorten(path: Path) -> str:
     return "~" + s[len(home):] if s.startswith(home) else s
 
 
-def welcome(cwd: Path, agent_name: str, model: str) -> None:
+def welcome(cwd: Path, agent_name: str, model: str, course: str = "") -> None:
     info = Text()
     info.append("✻ ", style="bc")
     info.append("Welcome to bcagent!", style="bold")
@@ -203,6 +203,9 @@ def welcome(cwd: Path, agent_name: str, model: str) -> None:
     info.append("agent: ", style="muted")
     info.append(agent_name, style="bc")
     info.append(f"  ({model}, runs 100% locally)\n", style="muted")
+    if course:
+        info.append("course: ", style="muted")
+        info.append(course + "\n", style="bold")
     tips = Text.from_markup("\n[muted]Tips for getting started:[/]\n" +
                             "\n".join(f" {i}. {t}" for i, t in enumerate(TIPS, 1)))
     if console.width >= 88:

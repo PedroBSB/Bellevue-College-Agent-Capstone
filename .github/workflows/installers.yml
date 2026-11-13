@@ -1,0 +1,71 @@
+name: installers
+
+# Runs the real installers on fresh machines. Weekly too, because they depend on outside things
+# (Ollama's installer, python.org, uv, PyPI) that can change without any change here.
+on:
+  push:
+    branches: ["**"]
+    paths: ["install.sh", "install.ps1", "install.bat", "uninstall.*", "pyproject.toml", "bcagent/**",
+            ".github/workflows/installers.yml"]
+  schedule:
+    - cron: "17 6 * * 1"     # Mondays
+  workflow_dispatch:
+
+jobs:
+  unix:
+    name: ${{ matrix.os }} installer
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-24.04, macos-latest]
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install (from this checkout, no model download)
+        run: ./install.sh --no-model
+      - name: Check the installation
+        run: |
+          export PATH="$HOME/.local/bin:$PATH"
+          bcagent --version
+          bcagent doctor
+          "$HOME/.bcagent/runenv/bin/python" -c "import numpy, pandas, sklearn, statsmodels, statsformula; print('libraries OK')"
+          bcagent course create && bcagent course show
+      - name: Uninstall
+        run: ./uninstall.sh && test ! -e "$HOME/.local/bin/bcagent"
+
+  lab-computer:
+    # A bare Ubuntu without Python, and a student account without sudo: everything must go into ~/.bcagent
+    name: no Python, no admin rights (Ubuntu container)
+    runs-on: ubuntu-24.04
+    container: ubuntu:24.04
+    steps:
+      - uses: actions/checkout@v4
+      - name: Minimal tools only (curl, git, ca-certificates – no python3, no sudo)
+        run: |
+          apt-get update -qq && apt-get install -y -qq curl ca-certificates git zstd >/dev/null
+          ! command -v python3
+          useradd -m student
+          cp -r "$GITHUB_WORKSPACE" /home/student/bcagent && chown -R student /home/student/bcagent
+      - name: Install as the student
+        run: su student -c "cd ~/bcagent && ./install.sh --no-model"
+      - name: Check
+        run: |
+          su student -c '~/.local/bin/bcagent --version && ~/.local/bin/bcagent doctor'
+          su student -c '~/.bcagent/runenv/bin/python -c "import numpy, pandas, sklearn, statsmodels, statsformula; print(\"libraries OK\")"'
+
+  windows:
+    name: windows installer
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install (from this checkout, no model download)
+        shell: powershell
+        run: powershell -ExecutionPolicy Bypass -File install.ps1 -NoModel
+      - name: Check the installation
+        shell: powershell
+        run: |
+          & "$env:USERPROFILE\.bcagent\bin\bcagent.cmd" --version
+          if ($LASTEXITCODE -ne 0) { exit 1 }
+          & "$env:USERPROFILE\.bcagent\bin\bcagent.cmd" doctor
+          & "$env:USERPROFILE\.bcagent\runenv\Scripts\python.exe" -c "import numpy, pandas, sklearn, statsmodels, statsformula; print('libraries OK')"
+          if ($LASTEXITCODE -ne 0) { exit 1 }

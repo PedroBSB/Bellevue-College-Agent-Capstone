@@ -52,7 +52,7 @@ def test_internal_error_offers_report(make_session, monkeypatch):
             raise EOFError from None   # ctrl+d ends the session
     monkeypatch.setattr(cli, "make_prompt", lambda session: read)
     monkeypatch.setattr(ui, "is_interactive", lambda: True)
-    monkeypatch.setattr(ui, "welcome", lambda *a: None)
+    monkeypatch.setattr(ui, "welcome", lambda *a, **k: None)
     monkeypatch.setattr(cli, "run_request", lambda *a: 1 / 0)
     offered = []
     monkeypatch.setattr(cli.report_mod, "offer", lambda e, **k: offered.append(e))

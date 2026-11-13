@@ -208,6 +208,20 @@ if ((Test-Path (Join-Path $ScriptDir "pyproject.toml")) -and (Test-Path (Join-Pa
   & $VPy -m pip install --quiet --upgrade $ScriptDir
 } else {
   Say "Installing bcagent and its requirements from GitHub"
+  # the latest tested release (github.com/<repo>/releases/latest redirects to .../tag/vX.Y.Z)
+  $Tag = $null
+  if (-not $env:BCAGENT_INSTALL_MAIN) {
+    try {
+      $req = [System.Net.WebRequest]::Create("https://github.com/PedroBSB/Bellevue-College-Agent-Capstone/releases/latest")
+      $req.Method = "HEAD"; $req.AllowAutoRedirect = $true
+      $resp = $req.GetResponse(); $final = $resp.ResponseUri.AbsoluteUri; $resp.Close()
+      if ($final -match "/releases/tag/(.+)$") { $Tag = $Matches[1] }
+    } catch { $Tag = $null }
+  }
+  if ($Tag) {
+    $RepoZip = "https://github.com/PedroBSB/Bellevue-College-Agent-Capstone/archive/refs/tags/$Tag.zip"
+    Say "Installing bcagent $Tag from GitHub"
+  }
   & $VPy -m pip install --quiet --upgrade $RepoZip
 }
 if ($LASTEXITCODE -ne 0) { Die "pip install failed" }
