@@ -114,7 +114,14 @@ def add(name: str, server: dict, root: Optional[Path] = None, project: bool = Fa
     ensure_home()
     path = Path(root) / PROJECT_FILE if project else USER_FILE
     servers = _read(path)
-    servers[name] = {k: v for k, v in server.items() if k in ("command", "args", "env")}
+    server = {k: v for k, v in server.items() if k in ("command", "args", "env")}
+    if not project:
+        # user servers start from whatever folder bcagent runs in: save script paths in full
+        # (project servers in .mcp.json keep paths relative to the project, so they can be shared)
+        base = Path(root or Path.cwd())
+        server["args"] = [str((base / a).resolve()) if not a.startswith("-") and (base / a).is_file() else a
+                          for a in server.get("args", [])]
+    servers[name] = server
     _write(path, servers)
     return path
 

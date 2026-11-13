@@ -4,409 +4,834 @@
   <img src="assets/bcagent-logo.svg" alt="bcagent: Bellevue College Agent, the multicolor Bulldog logo" width="300">
 </p>
 
-`bcagent` is a terminal coding agent modeled on Claude Code. You type a prompt, it reads your
-project, generates Python code, shows you a diff, and edits files once you approve. It runs
-entirely on your machine: no API keys, no cloud, no cost.
+<p align="center">
+  <a href="https://github.com/PedroBSB/Bellevue-College-Agent-Capstone/actions/workflows/ci.yml"><img src="https://github.com/PedroBSB/Bellevue-College-Agent-Capstone/actions/workflows/ci.yml/badge.svg" alt="tests"></a>
+  <a href="https://github.com/PedroBSB/Bellevue-College-Agent-Capstone/releases/latest"><img src="https://img.shields.io/github/v/release/PedroBSB/Bellevue-College-Agent-Capstone?label=release" alt="latest release"></a>
+  <img src="https://img.shields.io/badge/runs-100%25%20on%20your%20computer-003D79" alt="runs locally">
+</p>
 
-The default agent, **bulldog**, runs **Qwen2.5-Coder 0.5B** (`qwen2.5-coder:0.5b`, about 400 MB) through
-[Ollama](https://ollama.com). It's the smallest and fastest instruction-tuned code model on Ollama,
-and it produces more than 100 tokens/s on a laptop CPU or GPU. You can install larger or different
-agents at any time.
+**bcagent** is an AI coding assistant that lives in your terminal. You tell it in plain English what
+you want, for example *"write a program that converts Celsius to Fahrenheit"*, and it writes the
+Python code, shows you exactly what it wants to change, and saves the file **only after you say
+yes**. It can also run your code, fix errors, run your tests, explain concepts, use git and GitHub,
+and edit Google Colab and Jupyter notebooks.
 
-The interface uses **Bellevue College Blue** (`#003D79`) and the Bulldog mascot.
+Everything runs **on your own computer**: no account, no API key, no cloud, no cost. Your code
+never leaves your machine unless you push it to GitHub yourself.
+
+> New to AI assistants and "agents"? Start with [What is an AI agent?](#what-is-an-ai-agent). It
+> needs no background knowledge.
+
+---
+
+## Contents
+
+1. [What is an AI agent?](#what-is-an-ai-agent) – the ideas behind bcagent, in plain words
+2. [Install](#install)
+3. [Your first session (5 minutes)](#your-first-session-5-minutes)
+4. [Talking to bcagent](#talking-to-bcagent) – prompts, `@files`, approving changes, shortcuts
+5. [All commands, with examples](#all-commands-with-examples)
+6. [Agents: what they are, choosing one, creating your own](#agents)
+7. [MCP: giving the agent new tools](#mcp-giving-the-agent-new-tools)
+8. [For students and instructors](#for-students-and-instructors)
+9. [Data science: built-in libraries and notebooks](#data-science-built-in-libraries-and-notebooks)
+10. [Git and GitHub](#git-and-github)
+11. [Google Colab](#google-colab)
+12. [Safety and privacy](#safety-and-privacy)
+13. [Updates and going back to an older version](#updates)
+14. [Settings](#settings)
+15. [Troubleshooting](#troubleshooting)
+16. [Development](#development)
+
+---
+
+## What is an AI agent?
+
+**A language model (LLM)** is a program trained on a huge amount of text and code. Give it some
+text (a *prompt*) and it continues it: answer a question, write a function, explain an error.
+ChatGPT and Claude are large language models running in data centers. bcagent uses a *small* model
+(about 400 MB) that runs on your laptop through a free program called **[Ollama](https://ollama.com)**.
+
+**A chatbot** only talks. You copy its code into your files, run it, copy the error back, and
+repeat.
+
+**An agent** is a language model that can also *act*. It reads your project, writes the files,
+runs the program, sees the error, and tries again, while you watch and approve each step. That
+is what bcagent does:
+
+```
+   you: "add a function that averages a list in stats.py"
+     │
+     ▼
+ ┌─────────────────────────────────────────────────────────────────────┐
+ │ 1. bcagent collects context: your files, the folder, BCAGENT.md     │
+ │ 2. the model (on your computer) writes an answer with the new code  │
+ │ 3. bcagent turns it into an edit and shows you a colored diff       │
+ │ 4. YOU decide: Yes / No / "Chat about this" (ask for something else)│
+ │ 5. bcagent saves the file, checks it for syntax errors, offers to   │
+ │    run it, and sends any error back to the model to fix             │
+ └─────────────────────────────────────────────────────────────────────┘
+```
+
+A few more words you will see:
+
+| Word | Meaning |
+|------|---------|
+| **Prompt** | What you type: your request or question. |
+| **Model** | The trained AI "brain". Bigger models are smarter but slower and need more memory. bcagent's default is `qwen2.5-coder:0.5b` (0.5 billion parameters, ~400 MB). |
+| **Ollama** | The free program that runs models on your computer. The installer sets it up. |
+| **Context** | Everything the model sees for one request: your prompt, the relevant files, earlier messages. Small models have a small context, so they can't see huge files at once (bcagent protects you from that, see [Safety](#safety-and-privacy)). |
+| **Agent** (in bcagent) | A model plus instructions plus a way of editing files, e.g. *bulldog* (writes code), *explainer* (only explains), *tester* (writes tests). You can switch agents or [make your own](#create-your-own-agent). |
+| **Diff** | The before/after view of a change: green lines are added, red lines removed. |
+| **MCP** | *Model Context Protocol*: a standard way to plug extra tools into an agent (web pages, a database, your own Python functions). See [MCP](#mcp-giving-the-agent-new-tools). |
+| **Token** | A piece of a word. Models read and write tokens, and speed is measured in tokens per second. |
+
+**What to expect from a small local model.** The default model is fast and great for short
+programs, exercises, explanations and small fixes. It makes more mistakes than ChatGPT-class
+models, so read the diff before you accept it. For harder work, install a bigger agent, such as
+`bulldog-3b` (see [Agents](#agents)).
 
 ---
 
 ## Install
 
-The installers set up everything that's missing: **Python 3**, **Ollama**, the `bcagent` CLI with
-its Python requirements (in an isolated virtual environment), and the default model.
+The installer sets up everything that is missing: **Python**, **Ollama**, **bcagent** itself, the
+default **model**, and the default **data-science libraries** (numpy, pandas, scikit-learn,
+statsmodels, statsformula). It needs no administrator rights.
 
-| OS | Command |
-|----|---------|
-| **macOS / Linux** | `./install.sh` |
-| **Windows** | double-click `install.bat`, or run `powershell -ExecutionPolicy Bypass -File install.ps1` |
+| Your computer | Run this in a terminal |
+|---------------|------------------------|
+| **macOS / Linux** | `curl -fsSL https://raw.githubusercontent.com/PedroBSB/Bellevue-College-Agent-Capstone/main/install.sh \| bash` |
+| **Windows** | open **PowerShell** and run `irm https://raw.githubusercontent.com/PedroBSB/Bellevue-College-Agent-Capstone/main/install.ps1 \| iex` |
 
-Install without cloning:
+Or download this repository and run `./install.sh` (macOS/Linux) or double-click `install.bat`
+(Windows). When it finishes, **open a new terminal** and check it:
 
 ```bash
-# macOS / Linux
-curl -fsSL https://raw.githubusercontent.com/PedroBSB/Bellevue-College-Agent-Capstone/main/install.sh | bash
-```
-```powershell
-# Windows PowerShell
-irm https://raw.githubusercontent.com/PedroBSB/Bellevue-College-Agent-Capstone/main/install.ps1 | iex
+bcagent --version
+bcagent doctor        # checks Python, Ollama, the model, git, GitHub sign-in and the libraries
 ```
 
-What the installer does:
+<details>
+<summary><b>What exactly the installer does, options, and uninstalling</b></summary>
 
 | Step | macOS | Linux | Windows |
 |------|-------|-------|---------|
-| Python 3.10+ (if missing) | Homebrew, or the official python.org `.pkg`; **no admin:** private Python in `~/.bcagent` | apt / dnf / yum / pacman / zypper / apk; **no sudo:** private Python in `~/.bcagent` | winget, or the python.org installer (per user); **blocked:** portable Python in `%USERPROFILE%\.bcagent\python` |
-| bcagent + requirements (`rich`, `prompt_toolkit`) | venv in `~/.bcagent/venv` | venv in `~/.bcagent/venv` | venv in `%USERPROFILE%\.bcagent\venv` |
-| `bcagent` command on PATH | `~/.local/bin/bcagent` | `~/.local/bin/bcagent` | `%USERPROFILE%\.bcagent\bin\bcagent.cmd` |
-| Ollama (if missing) | Homebrew, or Ollama.app (`~/Applications` without admin rights) | official `ollama.com/install.sh`; **no sudo:** unpacked into `~/.bcagent/ollama` | winget, or `OllamaSetup.exe`; **blocked:** portable Ollama in `%USERPROFILE%\.bcagent\ollama` |
-| Default model | `ollama pull qwen2.5-coder:0.5b` | same | same |
-| Default libraries for your code | numpy, pandas, scikit-learn, statsmodels, statsformula in `~/.bcagent/runenv` | same | same (`%USERPROFILE%\.bcagent\runenv`) |
+| Python 3.10+ (if missing) | Homebrew, or the python.org `.pkg`; **no admin:** private Python in `~/.bcagent` | apt / dnf / yum / pacman / zypper / apk; **no sudo:** private Python in `~/.bcagent` | winget, or the python.org installer (per user); **blocked:** portable Python in `%USERPROFILE%\.bcagent\python` |
+| bcagent + requirements (`rich`, `prompt_toolkit`) | venv in `~/.bcagent/venv` | same | `%USERPROFILE%\.bcagent\venv` |
+| `bcagent` command | `~/.local/bin/bcagent` | same | `%USERPROFILE%\.bcagent\bin\bcagent.cmd` |
+| Ollama (if missing) | Homebrew, or Ollama.app (`~/Applications` without admin) | `ollama.com/install.sh`; **no sudo:** `~/.bcagent/ollama` | winget or `OllamaSetup.exe`; **blocked:** portable `ollama.exe` |
+| Default model | `ollama pull qwen2.5-coder:0.5b` (~400 MB) | same | same |
+| Libraries for your code | numpy, pandas, scikit-learn, statsmodels, statsformula in `~/.bcagent/runenv` | same | same |
 
-Options: `--no-model` / `-NoModel` skips the model download, and `--no-packages` / `-NoPackages` skips
-the libraries. Both are then installed the first time bcagent starts.
+Options:
 
-**No administrator rights?** (lab and school computers, accounts without `sudo`.) The installer
-checks whether it can use `sudo`. If it can't, or if a system install fails, it installs whatever is
-missing for your user only:
+| Option | Effect |
+|--------|--------|
+| `--no-model` / `-NoModel` | don't download the model now (it downloads on first start) |
+| `--no-packages` / `-NoPackages` | don't install the libraries now (installed on first start) |
+| `--user` | never use `sudo`, even on an administrator account |
+| `--uninstall` / `-Uninstall` (or `uninstall.sh` / `uninstall.bat`) | remove bcagent, keep settings, Ollama and models |
+| `--uninstall-all` / `-UninstallAll` (add `--yes` / `-Yes` to skip the question) | remove **everything**: bcagent, settings, agents, MCP servers, models and Ollama (Python stays) |
 
-- **Python:** a private copy in `~/.bcagent`, installed with [uv](https://docs.astral.sh/uv/) or, if
-  that fails, a prebuilt [python-build-standalone](https://github.com/astral-sh/python-build-standalone)
-  build. The same fallback is used when the system Python can't create virtual environments (for
-  example Ubuntu without `python3-venv`). On Windows the fallback is the portable NuGet Python.
-- **Ollama:** on macOS in `~/Applications/Ollama.app`, on Linux in `~/.bcagent/ollama`, linked from
-  `~/.local/bin/ollama`. On Windows a portable `ollama.exe` goes in `%USERPROFILE%\.bcagent\ollama`.
+**Lab or school computer without admin rights?** The installer notices and installs whatever is
+missing for your user only: a private Python (via [uv](https://docs.astral.sh/uv/) or a prebuilt
+[python-build-standalone](https://github.com/astral-sh/python-build-standalone)), and a private
+Ollama.
 
-To skip `sudo` even on an administrator account, run `./install.sh --user`.
-`--uninstall` / `-Uninstall`, or `uninstall.sh` / `uninstall.bat`, removes bcagent (keeps settings, Ollama and models).
+</details>
 
-To remove **everything** (bcagent, settings, agents, MCP servers, the models and Ollama), use the
-uninstall-all option. It asks for confirmation first; add `--yes` / `-Yes` to skip the question.
-Python is left installed.
+**Requirements:** macOS 11+, Windows 10/11 or a modern Linux; about 2 GB of free disk space and
+2 GB of RAM for the default agent (bigger agents need more, see the [catalog](#the-agent-catalog)).
 
-```bash
-./uninstall.sh --all          # or: ./install.sh --uninstall-all
-```
-```bat
-uninstall.bat --all           & rem or: install.ps1 -UninstallAll
-```
+---
 
-## Updates
+## Your first session (5 minutes)
 
-bcagent keeps itself up to date. When it starts, it compares its version with the latest
-[GitHub release](https://github.com/PedroBSB/Bellevue-College-Agent-Capstone/releases). It checks at
-most every 6 hours, and a check takes at most 3 seconds, so being offline doesn't slow it down. If a
-newer release exists, bcagent upgrades itself and restarts with the same arguments. Only tagged
-releases reach users, and each one must first pass the tests on macOS, Linux and Windows. A push to
-`main` alone changes nothing for students. Run `bcagent update` (or `/update` in a session) to check
-right away.
-
-**Going back to an earlier version:** `bcagent update --list` shows the releases, and
-`bcagent update --to 1.5.0` installs one. That also pauses automatic updates. A plain
-`bcagent update` returns to the latest release and turns them back on. To turn automatic updates off, set
-`"auto_update": false` in `~/.bcagent/config.json` or set `BCAGENT_NO_UPDATE=1`. If bcagent wasn't
-installed with the bcagent installer, it only tells you that a new version is available.
-
-## Use
+Make a folder for practice and start bcagent in it. bcagent only ever reads and writes files
+**inside the folder you start it in**.
 
 ```bash
-cd my-project
-bcagent                                   # interactive session, like `claude`
-bcagent "create a todo list app in todo.py"   # start the session with a prompt
-bcagent -p "write fizzbuzz in fizz.py" --yes  # one-shot / scripting mode, like `claude -p`
-bcagent -a tester "write tests for @calc.py"  # use a specific agent
-bcagent -m qwen2.5-coder:1.5b                 # use any Ollama model for this run
-bcagent mcp add fetch                         # add a public MCP server (see below)
-bcagent --colab https://colab.research.google.com/drive/1AbC…   # edit a Google Colab notebook
-bcagent --learn                               # learning mode: hints instead of finished code
-bcagent -c                                    # continue the last conversation here (-r to pick one)
-bcagent doctor                                # check the installation
-bcagent packages                              # check / install the default libraries
-bcagent bug "what went wrong"                 # report a problem on GitHub
-bcagent update                                # update bcagent now (it also updates itself)
+mkdir hello-bulldogs
+cd hello-bulldogs
+bcagent
 ```
 
-bcagent works on the folder you start it in (or `-C <folder>`): it can read every file there, and it
-creates and changes files inside that folder after you approve the diff. It never writes outside it.
+You see the Bulldog welcome screen and a `>` prompt. Try these one at a time:
 
-Each request goes through these steps:
+**1. Ask for a program.**
 
-1. bcagent sends the prompt with the project's file tree, `BCAGENT.md` notes, and the relevant files.
-2. The local model streams its answer to the terminal.
-3. bcagent turns the answer into file edits and shows them as a colored diff. Choose
-   **Yes / Yes, don't ask again / No / Chat about this** with the **↑/↓ arrow keys** and `enter`
-   (or press the option's number, `y`, `n` or `esc`). **Chat about this** lets you type a reply
-   to clarify the request or ask for a different change. It is offered every time bcagent asks
-   you something.
-4. After writing a `.py` file, bcagent compiles it. On a syntax error it asks the model to fix the
-   file, up to 2 times by default.
-5. bcagent offers to run the Python scripts it writes, even when the model didn't suggest a command,
-   and it asks before running any command. Python code runs with the project's own `.venv` if there
-   is one. Otherwise it uses a private environment (`~/.bcagent/runenv`), so `python` and `pip install`
-   work even on machines without a system Python or where `pip` is blocked. The output goes back to
-   the agent, and if the script fails you can send the error to the model to fix. If the error is
-   *No module named X*, bcagent offers to `pip install` it and run the script again. Run a file any
-   time with `/run file.py`.
+```
+> create temps.py that converts a temperature from Celsius to Fahrenheit, asking the user for the number
+```
 
-**Built-in libraries.** Code that bcagent runs can always use **numpy, pandas, scikit-learn,
-statsmodels and statsformula** (R-style formulas, e.g. `sf.dmatrices("y ~ x + C(group)", df)`), and
-the agent knows they are there. bcagent checks at every start, with a fast check that needs no
-network, and installs whatever is missing. Change the list with `"default_packages"` in
-`~/.bcagent/config.json`.
+bcagent thinks for a moment, then shows the new file as a green diff and asks:
 
-**Plain-language actions.** Requests like *"commit and push"*, *"run the tests"*, *"save it to
-colab"*, *"open a pull request"*, *"undo the last commit"* or *"set up an ssh key"* are recognized
-directly, even with the tiny default model. bcagent asks before it runs them. Mixed requests such as
-*"fix the bug in calc.py and commit"* go to the agent first, then bcagent offers the action. Questions
-like *"how do I push?"* always go to the agent.
+```
+Do you want to create temps.py?
+❯ 1. Yes
+  2. Yes, and don't ask again this session (shift+tab)
+  3. No
+  4. Chat about this
+```
 
-**Safety for big files.** Small models see only part of a long file. If the agent tries to rewrite a
-file it only saw part of, which would delete the rest, bcagent refuses the edit and suggests what to
-do instead. The same happens when it rewrites a file it never saw into something much shorter.
-Search-and-replace edits on long files still work.
+Use the **↑/↓ arrows** and **Enter**, or press **1**. bcagent saves the file and offers to run it:
+`Run this command?  python temps.py` → **Yes**. Type a number when the program asks.
 
-**Jupyter notebooks.** `.ipynb` files in the project are shown to the agent as Python with `# %%`
-cells and saved back as real notebooks. Outputs of unchanged cells are kept, and `/undo` restores the
-exact original file. bcagent warns when an edit removes code cells.
+**2. Change it.** Mention a file with `@` (press Tab to complete the name):
 
-### For students and instructors
+```
+> make @temps.py also convert Fahrenheit to Celsius, with a menu to choose
+```
+
+**3. Ask a question.** Not every request has to change files:
+
+```
+> explain what the if __name__ == "__main__" line in @temps.py does
+```
+
+**4. Undo, save your work and leave.**
+
+```
+> /undo                      # puts temps.py back the way it was before the last change
+> /git init                  # (optional) start version control
+> commit my changes          # plain English works for common actions
+> exit
+```
+
+Tomorrow, `bcagent -c` in the same folder **continues the conversation** where you left off.
+
+---
+
+## Talking to bcagent
+
+**Write requests like you would to a classmate:** say what you want, which file, and anything
+important. Good prompts:
+
+```
+create a tic-tac-toe game in tictactoe.py for two players in the terminal
+add input validation to @calc.py so it rejects letters
+why does @grades.py print None at the end?
+write pytest tests for @utils.py
+read data.csv with pandas and plot the average score per week, save the plot as weekly.png
+```
+
+| You type | What happens |
+|----------|--------------|
+| any text | a request for the agent (or a [built-in action](#plain-language-actions), e.g. *commit and push*) |
+| `@file.py` or `@folder/` | includes that file (or all files of a folder) in the context; **Tab** completes names |
+| `!command` | runs a shell command, e.g. `!ls` or `!python temps.py`; the output is shared with the agent |
+| `/command` | a bcagent command, e.g. `/help` (see [all commands](#all-commands-with-examples)) |
+| `?` | quick help |
+
+**When bcagent asks you something** (save this file? run this command?), choose with **↑/↓** and
+**Enter**, press the option's **number**, `y`, `n`, or **Esc** for no. **Chat about this** lets you
+type a reply instead: *"use a while loop instead"* or *"why do you want to change line 12?"*.
+
+**Keyboard shortcuts**
+
+| Keys | Action |
+|------|--------|
+| `shift+tab` | auto-accept edits on/off (bcagent stops asking before saving files) |
+| `esc` then `enter` | new line in your prompt |
+| `ctrl+c` while bcagent is answering | stop the answer |
+| `ctrl+c` / `ctrl+d` at the prompt, or `exit` | leave bcagent |
+| `↑` / `↓` at the prompt | earlier prompts |
+
+**What happens after an edit:** bcagent checks every Python file it writes for syntax errors and
+asks the model to fix them (up to 2 times). It offers to run scripts it wrote. Your code runs with
+the project's own `.venv` if there is one, otherwise with bcagent's private environment, which
+already has the [data-science libraries](#data-science-built-in-libraries-and-notebooks). If the
+program crashes, bcagent offers to send the error to the agent to fix. If the error is
+*No module named X*, it offers to `pip install` it.
+
+### Plain-language actions
+
+Even with the tiny default model, bcagent recognizes common requests and does them itself
+(it always asks first):
+
+| You say | bcagent runs |
+|---------|--------------|
+| *commit my changes*, *commit and push* | `/git commit` → `/git push` |
+| *pull the latest changes from github* | `/git pull` |
+| *what changed?* | `/git` (status) |
+| *undo the last commit* | `/git revert` |
+| *create a github repo for this project*, *put this on github* | `/github create` |
+| *open a pull request* | `/github pr` |
+| *set up an ssh key*, *sign in to github* | `/github ssh`, `/github login` |
+| *run the tests* | `/test` |
+| *review my code* | `/review` |
+| *save it to colab* | `/colab push` |
+
+Mixed requests such as *"fix the bug in calc.py and commit"* go to the agent first, then bcagent
+offers the commit. Questions (*"how do I push to GitHub?"*) always go to the agent, which explains.
+
+---
+
+## All commands, with examples
+
+### Inside a session
+
+| Command | What it does | Example |
+|---------|--------------|---------|
+| `/help` | all commands and shortcuts | `/help` |
+| `/undo` | undo the last set of file changes | `/undo` |
+| `/run [file.py] [args]` | run a Python file (default: the last one bcagent wrote) | `/run temps.py` |
+| `/test [pytest args]` | run the tests; on failures offer a fix and run again | `/test -k average` |
+| `/review [@file …]` | instructor-style feedback, without rewriting your code | `/review @grades.py` |
+| `/learn [on\|off]` | learning mode: hints and explanations instead of finished code | `/learn` |
+| `/export [file.md]` | save a readable log of this session | `/export lab3-log.md` |
+| `/resume` | continue an earlier conversation in this folder | `/resume` |
+| `/add <file>` / `/drop <file\|all>` / `/files` | always include a file in the context / stop / list | `/add data.csv` |
+| `/init` | create `BCAGENT.md`, notes the agent reads with every prompt | `/init` |
+| `/agents` / `/agents catalog` | installed agents / agents you can install | `/agents catalog` |
+| `/agent <name>` | switch agent | `/agent explainer` |
+| `/install <name\|model\|file.md\|url>` | install an agent | `/install bulldog-3b` |
+| `/model <ollama-tag>` | use another model for this session | `/model qwen2.5-coder:1.5b` |
+| `/mcp …` | MCP servers: `list`, `catalog`, `add`, `remove`, `tools` | `/mcp add fetch` |
+| `/git …` | git: status, diff, commit, push, pull, branch, revert … | `/git commit` |
+| `/github …` | GitHub: login, ssh, create, pr, prs, open | `/github create` |
+| `/colab …` | Google Colab notebooks: link, pull, push, open … | `/colab <url>` |
+| `/packages` | check / install the default libraries | `/packages` |
+| `/bug [what happened]` | report a problem with bcagent on GitHub | `/bug the diff colors are wrong` |
+| `/auto` | auto-accept edits on/off (same as shift+tab) | `/auto` |
+| `/clear` | forget the conversation (start fresh) | `/clear` |
+| `/status`, `/doctor` | current agent and model / check the installation | `/doctor` |
+| `/update [--to <version> \| --list]` | update or roll back bcagent, then restart | `/update` |
+| `/exit` | leave (also `exit`, `quit`, ctrl+d) | `/exit` |
+
+### From the terminal
 
 | Command | What it does |
 |---------|--------------|
-| `/learn` (or `bcagent --learn`) | **Learning mode:** explanations, hints and guiding questions instead of finished code; no file edits. Instructors can turn it on for everyone with `"learn_mode": true` in the config or `BCAGENT_LEARN=1`. |
-| `/review [@file …]` | Instructor-style feedback (what works, bugs, style, tests, next step) without rewriting the code. With no file named, it reviews your uncommitted Python files. |
-| `/test` | Runs `pytest`. On failures it offers to let the agent fix **your code**, never the tests, and runs the tests again (up to 3 rounds). It installs pytest if needed, and offers to write tests if there are none. |
-| `/export [file.md]` | Saves a readable log of the session: prompts, answers, applied edits with diffs, commands and their results. Students can hand it in with an assignment to show how they used the AI. |
-| `/resume`, `bcagent -c` | Continue an earlier conversation in this folder. The last 10 are kept. |
+| `bcagent` | start a session in the current folder |
+| `bcagent "create a todo app in todo.py"` | start a session with a first request |
+| `bcagent -p "write fizzbuzz in fizz.py" --yes` | one-shot: do the request, print the answer, exit (`-y`/`--yes` saves edits without asking) |
+| `bcagent -c` / `bcagent -r` | continue the last conversation / pick an earlier one |
+| `bcagent --learn` | start in learning mode |
+| `bcagent -a tester "write tests for @calc.py"` | use a specific agent (install it first: `bcagent agents install tester`) |
+| `bcagent -m qwen2.5-coder:1.5b` | use any Ollama model for this run |
+| `bcagent -C ~/projects/lab3` | work on another folder |
+| `bcagent --colab <url> "add a cell that plots x"` | link a Colab notebook and edit it |
+| `bcagent agents list\|catalog\|install\|create\|use\|remove` | manage [agents](#agents) |
+| `bcagent mcp list\|catalog\|add\|remove\|tools` | manage [MCP servers](#mcp-giving-the-agent-new-tools) |
+| `bcagent git <command>` / `bcagent github <command>` | [git and GitHub](#git-and-github) without a session |
+| `bcagent colab login\|list\|link\|pull\|push` | [Colab](#google-colab) without a session |
+| `bcagent packages [list]` | check / install the default libraries |
+| `bcagent doctor` | check the installation |
+| `bcagent update [--to X.Y.Z \| --list]` | update or roll back |
+| `bcagent bug "what went wrong"` | report a problem |
+| `bcagent --version`, `bcagent --help` | |
 
-**Reporting bugs.** If something goes wrong inside bcagent, it keeps running and asks whether you want
-to report the problem. You see the complete report first. Your home folder is replaced with `~`,
-tokens, keys and email addresses are removed, and your prompt is included only if you say yes. With a
-GitHub sign-in it files the issue from your account, and adds a comment instead if the same bug is
-already reported. Without a sign-in it opens a pre-filled *New issue* page in your browser. Report a
-problem yourself with `/bug what happened`. Choose *"don't ask again"* to turn the question off
-(`"bug_reports": false`).
-
-### Inside the session
-
-| Input | Action |
-|-------|--------|
-| `@file.py` / `@folder/` | tag a file or folder: its content is sent to the agent (`@` + tab completes, like Claude Code) |
-| `!command` | run a shell command; its output goes to the agent with your next prompt |
-| `↑` / `↓`, `enter` | pick an option when bcagent asks (or press its number); **Chat about this** to reply instead |
-| `shift+tab` | toggle auto-accept edits |
-| `esc` then `enter` | new line |
-| `quit`, `exit`, `ctrl+c`, `ctrl+d` | leave bcagent |
-| `ctrl+c` while it is answering | stop the current answer |
-| `/help` | all commands |
-| `/agents`, `/agents catalog` | list installed / installable agents |
-| `/agent <name>` | switch agent |
-| `/install <name\|model\|file.md\|url>` | install an agent |
-| `/model <ollama-tag>` | change the model for this session |
-| `/add`, `/drop`, `/files` | pin files in context |
-| `/init` | create `BCAGENT.md` project notes (like `CLAUDE.md`) |
-| `/mcp`, `/mcp catalog`, `/mcp add <name>`, `/mcp tools` | MCP servers |
-| `/git`, `/git commit`, `/git push`, `/git revert`, … | git version control (see below) |
-| `/github create`, `/github pr`, `/github login` | GitHub repositories and pull requests |
-| `/colab <url>`, `/colab pull\|push\|open\|list\|unlink\|login\|logout` | edit a Google Colab notebook (see below) |
-| `/run [file.py] [args]` | run a Python file (default: the last one bcagent wrote) |
-| `/test`, `/review`, `/learn`, `/export`, `/resume` | tests, feedback, learning mode, session log, earlier conversations (see above) |
-| `/packages` | check / install the default libraries |
-| `/bug [what happened]` | report a problem with bcagent on GitHub |
-| `/undo` | undo the last edits |
-| `/update [--to <version> \| --list]` | update (or roll back) bcagent and restart |
-| `/clear`, `/status`, `/doctor`, `/exit` | |
+---
 
 ## Agents
 
-An agent combines a local model, a set of instructions, and an edit format: `whole` writes full files
-and is the most reliable format for tiny models, `diff` uses SEARCH/REPLACE blocks for larger models,
-and `none` only chats.
+### What is an agent in bcagent?
+
+Think of an agent as **a role you hire for a job**. Each agent is three things:
+
+1. **A model**, the AI brain that runs on your computer (small and fast, or bigger and smarter).
+2. **Instructions**, a short "job description" the model reads before every request, e.g.
+   *"You write pytest unit tests"* or *"Explain code for a college student; never edit files"*.
+3. **An edit format**, how it changes files:
+   - `whole`: writes the complete file every time. Most reliable for tiny models (the default).
+   - `diff`: writes only the lines to change, as SEARCH/REPLACE blocks. Better for bigger models
+     and big files.
+   - `none`: only talks, never edits files.
+
+The default agent is **bulldog** (`qwen2.5-coder:0.5b`, `whole`): a fast general Python coder.
+
+### The agent catalog
 
 ```bash
-bcagent agents list                 # installed agents
-bcagent agents catalog              # ready-made agents
-bcagent agents install bulldog-1.5b # from the catalog (pulls the model)
-bcagent agents install codellama:7b --name llama --prompt "You write very short code"
-bcagent agents install ./my-agent.md                  # from a markdown file
-bcagent agents install https://example.com/agent.md   # from a URL
-bcagent agents create flaskdog      # write a template in ~/.bcagent/agents/flaskdog.md
-bcagent agents use bulldog-1.5b     # set the default agent
-bcagent agents remove llama --delete-model
+bcagent agents catalog
 ```
 
-Catalog: `bulldog-1.5b`, `bulldog-3b`, `bulldog-7b` (Qwen2.5-Coder), `deepseek-1.3b`, `yi-coder-1.5b`,
-`granite-3b`, plus three persona agents on the 0.5B model: `tester` (pytest), `explainer` (no edits),
-and `docs` (docstrings and READMEs).
+| Agent | Model | Size | Good for |
+|-------|-------|------|----------|
+| `bulldog` (default, installed) | Qwen2.5-Coder 0.5B | ~400 MB | fast; short programs, exercises, explanations |
+| `bulldog-1.5b` | Qwen2.5-Coder 1.5B | ~1 GB | smarter, still fast |
+| `bulldog-3b` | Qwen2.5-Coder 3B (`diff` edits) | ~1.9 GB | good quality, targeted edits of bigger files, MCP tools |
+| `bulldog-7b` | Qwen2.5-Coder 7B (`diff` edits) | ~4.7 GB | best quality; needs 8+ GB RAM |
+| `deepseek-1.3b`, `yi-coder-1.5b`, `granite-3b` | other small code models | 0.8–2 GB | alternatives to compare |
+| `tester` | 0.5B | – | writes pytest tests in `tests/test_<module>.py` |
+| `explainer` | 0.5B (`none`) | – | explains code and answers questions, never edits |
+| `docs` | 0.5B | – | adds docstrings, type hints and READMEs without changing behavior |
 
-To share an agent with a team, commit `.bcagent/agents/<name>.md` to the repository. Agent file format:
+### Using agents
+
+```bash
+bcagent agents install bulldog-3b       # download it (once); the model is pulled automatically
+bcagent -a bulldog-3b                   # use it for one session
+bcagent agents use bulldog-3b           # make it your default
+```
+
+Inside a session: `/agents` lists them, `/agent explainer` switches, and `/install tester`
+installs one. Example of using two agents in a row:
+
+```
+> /install tester
+> /agent tester
+> write tests for @stats.py
+> /agent bulldog
+> /test
+```
+
+**Which one should I use?** Start with `bulldog`. If answers are wrong or it struggles with
+bigger files, try `bulldog-1.5b`, then `bulldog-3b` (if your computer has 8 GB of RAM or more).
+Use `explainer` when you want to understand, not change, code.
+
+Any model on [ollama.com/library](https://ollama.com/library) works too:
+
+```bash
+bcagent agents install codellama:7b --name llama --prompt "You write very short code" --format diff
+bcagent -m llama3.2:3b                  # or just try a model for one session
+```
+
+### Create your own agent
+
+An agent is a small text file. Create a template and edit it:
+
+```bash
+bcagent agents create statsdog          # writes ~/.bcagent/agents/statsdog.md
+```
+
+**Example 1: a statistics tutor** that uses the built-in libraries and explains every step:
+
+```markdown
+---
+name: statsdog
+description: Statistics helper for data-analysis homework
+model: qwen2.5-coder:1.5b
+edit_format: whole        # whole (full files) | diff (SEARCH/REPLACE) | none (chat only)
+temperature: 0.2          # 0 = predictable, 1 = creative
+---
+You help students with statistics in Python.
+- Use pandas for data and statsmodels formulas (smf.ols("y ~ x", data=df)) for regression.
+- Use statsformula (sf.dmatrices) when the student writes R-style formulas.
+- After the code, explain in 3 short bullet points what the output means.
+- Always print the model summary and check for missing values first.
+```
+
+Then: `bcagent -a statsdog "regress score on hours_studied in grades.csv"`.
+
+**Example 2: a Flask web-app builder:**
 
 ```markdown
 ---
 name: flaskdog
-description: Builds Flask web apps
+description: Builds small Flask web apps
 model: qwen2.5-coder:1.5b
 edit_format: whole
-temperature: 0.2
 ---
 You build Flask web apps. Always include a requirements.txt and a templates/ folder.
+Keep each file short and add comments for beginners.
 ```
 
-## MCP servers
-
-bcagent can install public [Model Context Protocol](https://modelcontextprotocol.io) servers and lets the
-agent call their tools (each call asks for your approval unless auto-accept is on). The config file uses
-the same `mcpServers` format as Claude Code / Claude Desktop.
+**Share an agent with your class or team:** put the file in your project as
+`.bcagent/agents/<name>.md` and commit it. Everyone who runs bcagent in that project gets the
+agent. You can also install one from a file or a link:
 
 ```bash
-bcagent mcp catalog                         # public servers: filesystem, fetch, git, time, memory, ...
-bcagent mcp add fetch                       # from the catalog
-bcagent mcp add @modelcontextprotocol/server-memory    # any npm package (runs with npx)
-bcagent mcp add pypi:mcp-server-time        # any PyPI package (runs with uvx)
-bcagent mcp add weather -e API_KEY=123 -- python weather_server.py   # any command
-bcagent mcp add git --project               # save in ./.mcp.json to share with the repo
-bcagent mcp list                            # configured servers
-bcagent mcp tools                           # start them and list their tools
+bcagent agents install ./statsdog.md
+bcagent agents install https://example.com/agents/statsdog.md
+bcagent agents remove llama --delete-model      # remove an agent (and its model)
+```
+
+**Project notes for any agent:** `/init` creates a `BCAGENT.md` file in your project. Write your
+rules there (*"use type hints"*, *"tests go in tests/"*, *"this project analyzes NOAA weather
+data"*). It is sent with every prompt, just like `CLAUDE.md` for Claude Code.
+
+---
+
+## MCP: giving the agent new tools
+
+### What is MCP?
+
+On its own, the model can only read the files bcagent shows it and write text. **MCP (Model
+Context Protocol)** is an open standard, a bit like **USB for AI tools**: any program that "speaks
+MCP" (an **MCP server**) can offer *tools* to any agent that supports it. With MCP, the agent can
+fetch a web page, check the time, remember facts between sessions, query a database, or call
+functions you write yourself.
+
+How it works in bcagent:
+
+1. You add a server once: `bcagent mcp add fetch`.
+2. When a session starts, bcagent starts the server and tells the model which tools exist.
+3. When the model needs a tool, it asks for it. bcagent shows you the call and **asks for your
+   approval**, then gives the result back to the model, which continues.
+
+```
+> what's on the front page of https://example.com? summarize it
+● fetch.fetch({"url": "https://example.com"})
+Allow MCP tool fetch.fetch?
+❯ 1. Yes
+  2. Yes, and don't ask again for fetch.fetch this session
+  3. No
+  ⎿  Example Domain · This domain is for use in illustrative examples …
+● The page is a placeholder that says the domain is reserved for examples …
+```
+
+> **Tip:** tools need a model that's good at following instructions. The tiny default model
+> often ignores tools or makes up an answer. For MCP, use `bulldog-3b` or bigger
+> (`bcagent -a bulldog-3b`).
+
+### Installing MCP servers
+
+```bash
+bcagent mcp catalog                 # ready-made public servers
+bcagent mcp add fetch               # add one
+bcagent mcp list                    # what you have
+bcagent mcp tools                   # start them and list their tools
 bcagent mcp remove fetch
 ```
 
-User servers live in `~/.bcagent/mcp.json`, project servers in `./.mcp.json`. Only stdio servers are
-supported. npm servers need Node.js and PyPI servers need [uv](https://docs.astral.sh/uv/).
-Small models such as the default 0.5B one rarely use tools well; a larger agent like `bulldog-3b`
-works better with MCP.
+| Server | What it gives the agent | Needs |
+|--------|-------------------------|-------|
+| `fetch` | read web pages (as markdown) | [uv](https://docs.astral.sh/uv/) |
+| `time` | current time, time-zone conversion | uv |
+| `git` | git status, diff, log, commit | uv |
+| `filesystem` | read, write and search files in the project | [Node.js](https://nodejs.org) |
+| `memory` | a memory that persists between sessions | Node.js |
+| `sequential-thinking` | a step-by-step problem-solving tool | Node.js |
+| `everything` | a test server that exercises every MCP feature | Node.js |
+
+Thousands of other servers exist (search for "MCP server" plus a topic). Add them by package name or
+command:
+
+```bash
+bcagent mcp add @modelcontextprotocol/server-memory          # any npm package (runs with npx)
+bcagent mcp add pypi:mcp-server-time                          # any PyPI package (runs with uvx)
+bcagent mcp add weather -e API_KEY=abc123 -- python weather_server.py   # any command, with a secret
+bcagent mcp add git --project                                 # save in ./.mcp.json to share with the repo
+```
+
+Inside a session the same commands start with `/mcp`, e.g. `/mcp add fetch`. Your servers are in
+`~/.bcagent/mcp.json`. Project servers are in `./.mcp.json`, which you can commit so classmates get
+them too. The format is the same `mcpServers` format Claude Code and Claude Desktop use.
+
+### Write your own MCP server (10 lines of Python)
+
+A server is a Python file with functions marked as tools. The function's docstring tells the
+model what the tool does. Install the official library once with `pip install mcp`, then save this
+as `grades_server.py`:
+
+```python
+"""A tiny MCP server: gives the agent a tool to look up course grades."""
+from mcp.server import MCPServer      # mcp 2.x  (for mcp 1.x: from mcp.server.fastmcp import FastMCP)
+
+mcp = MCPServer("grades")
+
+GRADES = {"alice": 93, "bob": 78, "chen": 88}
+
+
+@mcp.tool()
+def get_grade(student: str) -> str:
+    """Return the course grade (0-100) of a student by first name."""
+    grade = GRADES.get(student.lower())
+    return f"{student}: {grade}" if grade is not None else f"no student named {student}"
+
+
+if __name__ == "__main__":
+    mcp.run()
+```
+
+Add it and use it:
+
+```bash
+bcagent mcp add grades -- python grades_server.py
+bcagent mcp tools                     # → grades.get_grade  Return the course grade (0-100) …
+bcagent -a bulldog-3b "What is Bob's grade? Use the grades tool."
+```
+
+```
+● grades.get_grade({"student": "Bob"})       ← bcagent asks before running it
+● Bob's grade is 78.
+```
+
+Ideas for your own servers: look up a class schedule, query a SQLite database, call a weather
+API, read sensor data, or search your notes.
+
+---
+
+## For students and instructors
+
+| Command | What it does |
+|---------|--------------|
+| `/learn` or `bcagent --learn` | **Learning mode.** bcagent explains concepts, points to the line with the problem, gives the next step as a hint and asks a guiding question. It does **not** write the solution and never edits files. Instructors can turn it on for a whole lab with `"learn_mode": true` in the config or `BCAGENT_LEARN=1`. |
+| `/review [@file …]` | **Code review** like an instructor's: what works well, bugs (file and line), style (PEP 8, names, docstrings), what to test, one next step. It doesn't rewrite anything. With no file, it reviews your uncommitted Python files. |
+| `/test` | Runs **pytest**. If tests fail, it offers to let the agent fix **your code**. It never changes the tests to make them pass. Then it runs them again, up to 3 rounds. It installs pytest if needed and offers to write tests if there are none. |
+| `/export [file.md]` | Saves a **session log**: every prompt, answer, applied edit (with diff) and command with its result. Students can hand it in with an assignment to show how they used AI. |
+| `/resume`, `bcagent -c` | Continue an earlier conversation in this folder (the last 10 are kept). |
+
+Example, learning mode:
+
+```
+> /learn
+✓ learning mode on: bcagent explains and gives hints but doesn't write the solution or edit files.
+> my @average.py crashes with ZeroDivisionError
+● The crash happens on line 4, where you divide by len(numbers). When is that zero?
+  Hint: check what the function should return for an empty list before dividing.
+  Question: what does your program do if the user enters no numbers at all?
+```
+
+---
+
+## Data science: built-in libraries and notebooks
+
+Code that bcagent runs can always use **numpy, pandas, scikit-learn, statsmodels and
+[statsformula](https://github.com/PedroBSB/statsformula)** (R-style formulas for Python). The agent
+knows they are installed, so requests like these just work:
+
+```
+> read sales.csv with pandas and print the average revenue per month
+> fit a linear regression of price on size and rooms with statsmodels and print the summary
+> use statsformula to build the design matrix for "y ~ x + C(region)" and fit it with scikit-learn
+> split iris into train and test and compare a decision tree with logistic regression
+```
+
+statsformula in one line: `import statsformula as sf; y, X = sf.dmatrices("y ~ x + C(group)", df)`.
+
+bcagent checks the libraries every time it starts. It's a fast check that needs no internet, and
+bcagent installs whatever is missing. `bcagent packages` does it by hand. Change the list with
+`"default_packages"` in the [settings](#settings).
+
+**Jupyter notebooks (`.ipynb`).** bcagent can edit notebooks in your project. It shows them to the
+agent as Python, where every cell starts with `# %%` and text cells with `# %% [markdown]`, and
+saves them back as real notebooks. Cells you didn't change keep their outputs, `/undo` restores the
+exact original file, and bcagent warns if an edit would delete code cells.
+
+```
+> add a cell to @lab2.ipynb that plots the histogram of the age column
+```
+
+---
 
 ## Git and GitHub
 
-bcagent has git built in. Every command runs the real `git` in your project folder and explains
-errors in plain words. It always asks before anything that changes GitHub or throws work away.
+**Git** keeps the history of your project, like unlimited undo that you control with *commits*
+(snapshots). **GitHub** stores that history online so you can share it, back it up and hand in
+assignments. bcagent has both built in. Every command runs the real `git` and explains errors in
+plain words, and it always asks before anything that changes GitHub or throws work away.
+
+**A typical flow:**
 
 ```
-> /git init                 # start a repository (adds a Python .gitignore)
-> /git commit               # commit all changes – bcagent writes the message, you approve or edit it
-> /github create            # create a private GitHub repo for this folder and push it (--public to share)
-> /git branch add-tests     # new branch; edit files with bcagent as usual…
+> /git init                 start a repository here (adds a Python .gitignore)
+> /git commit               commit all changes; bcagent writes the message, you approve or edit it
+> /github create            create a private GitHub repository for this folder and upload it
+> /git branch add-tests     start a branch, make changes with bcagent as usual…
 > /git commit
-> /github pr                # push the branch and open a pull request
+> /github pr                upload the branch and open a pull request
 ```
 
-| Command | Action |
-|---------|--------|
+| Command | What it does |
+|---------|--------------|
 | `/git` | status: branch, changed files, commits to push or pull |
-| `/git init`, `/git clone <url\|owner/repo>` | start a repository / copy one from GitHub |
-| `/git diff [file]`, `/git log` | what changed / recent commits |
+| `/git init` · `/git clone <url\|owner/repo>` | start a repository · copy one from GitHub |
+| `/git diff [file]` · `/git log` | what changed · recent commits |
 | `/git commit [message]` | commit everything; without a message the local model writes one |
-| `/git push [--force]`, `/git pull` | send / get commits (shows what will be pushed and asks first) |
-| `/git branch [name]`, `/git switch <branch>`, `/git merge <branch>` | branches |
-| `/git revert [commit]` | undo a commit with a new commit (safe after pushing) |
-| `/git uncommit` | undo the last commit but keep the changes (only if it isn't pushed) |
-| `/git discard <file\|all>`, `/git stash [pop]`, `/git remote [url]` | |
+| `/git push [--force]` · `/git pull` | upload / download commits (shows what will be pushed and asks) |
+| `/git branch [name]` · `/git switch <branch>` · `/git merge <branch>` | branches |
+| `/git revert [commit]` | undo a commit with a new commit (safe even after pushing) |
+| `/git uncommit` | undo the last commit but keep the changes (only if not pushed yet) |
+| `/git discard <file\|all>` · `/git stash [pop]` · `/git remote [url]` | throw away changes · park them · set the GitHub address |
 | `/git <anything else>` | runs that git command, e.g. `/git tag v1.0` |
-| `/github login`, `/github logout`, `/github status` | sign in to GitHub |
+| `/github login` · `/github logout` · `/github status` | sign in to GitHub |
 | `/github ssh` | set up an SSH key for `git@github.com` addresses (guided) |
-| `/github create [name] [--public]`, `/github pr [title]`, `/github prs`, `/github open` | repos and pull requests |
+| `/github create [name] [--public]` | create a GitHub repository for this folder and push it (private unless `--public`) |
+| `/github pr [title]` · `/github prs` · `/github open` | open a pull request · list them · open the repo in the browser |
 
-The same commands work outside a session: `bcagent git commit`, `bcagent github create`.
-Before committing, bcagent warns about files that look like secrets (`.env`, keys,
-`client_secret*.json`). The first time you commit, it asks for your name and email, and it can
-suggest your private GitHub noreply address. Git commands that the agent suggests in its answers
-(```` ```bash ```` blocks) also get GitHub access.
+The same commands work outside a session (`bcagent git commit`, `bcagent github create`). bcagent
+won't commit files that look like secrets (`.env`, keys, `client_secret*.json`) unless you confirm.
+The first time you commit, it asks for your name and email and can suggest your private GitHub
+*noreply* address.
 
-**Signing in to GitHub.** `/github login` (or the first push or `/github create`) walks you through it:
+**Signing in to GitHub** happens the first time you need it (or with `/github login`). bcagent walks
+you through one of these options:
 
-- **GitHub CLI** (if [`gh`](https://cli.github.com) is installed): sign in with the browser. If you
-  are already signed in with `gh`, bcagent uses that automatically.
+- **GitHub CLI** (if [`gh`](https://cli.github.com) is installed): sign in with your browser. If you
+  already use `gh`, bcagent uses that sign-in automatically.
 - **Personal access token**: bcagent opens a GitHub page that already fills in the name and the
-  `repo` and `workflow` scopes. Choose an expiration, click *Generate token* and paste the token
-  (it starts with `ghp_`).
-
-- **SSH key** (for `git@github.com:…` addresses): `/github ssh` checks `~/.ssh` and offers to use an
-  existing key or create one with `ssh-keygen` (the passphrase is optional). It adds GitHub's
-  published host keys to `known_hosts`, then adds the public key to your GitHub account. That happens
-  automatically when your token allows it (the `write:public_key` scope). Otherwise bcagent copies
-  the key to the clipboard and opens github.com/settings/ssh/new for you. Finally it tests the
-  connection with `ssh -T git@github.com`. If a push, pull or clone fails because SSH isn't set up,
-  bcagent offers this setup, or switches the repository to HTTPS, and then tries again.
+  permissions (`repo`, `workflow`, `write:public_key`). Pick an expiration, click *Generate token*
+  and paste it (input is hidden).
+- **SSH key** (for `git@github.com:…` addresses): `/github ssh` checks `~/.ssh` and offers to reuse a
+  key or create one. It adds GitHub's official host keys, then uploads your public key, either
+  automatically or by copying it and opening GitHub's *New SSH key* page with steps. It finishes by
+  testing the connection. If a push or pull fails because SSH isn't set up, bcagent offers this
+  setup, or switches the repository to HTTPS, and tries again.
 
 `GH_TOKEN` / `GITHUB_TOKEN` also work. The token is stored only in `~/.bcagent/github/token.json`
-(readable only by you). git gets it through a credential helper in the environment, so it is never
-written into `.git/config` or shown in a command.
+(readable only by you) and is never written into `.git/config` or shown in a command.
+
+---
 
 ## Google Colab
 
-bcagent can edit your Google Colab notebooks. Paste the notebook's link:
+bcagent can edit your [Google Colab](https://colab.research.google.com) notebooks. Paste the link:
 
 ```
 > /colab https://colab.research.google.com/drive/1AbC…xyz
 ✓ linked Week 3 Lab.ipynb (12 cells) → colab/week_3_lab.py
 > add a cell that loads data.csv with pandas and plots the first column
+  ⎿  Saved to Colab: Week 3 Lab.ipynb (reload the Colab tab to see it)
 ```
 
-bcagent downloads the notebook from Google Drive into `colab/<name>.py`, one Python file where every
-cell starts with `# %%` and text cells start with `# %% [markdown]`. You ask for changes as usual and
-approve the diff. bcagent then uploads the notebook back to Colab. Cells that didn't change keep their
-outputs. **Reload the Colab tab** to see the changes, and don't edit the same notebook in Colab at the
-same time. If the notebook changed in Colab after bcagent downloaded it, bcagent asks before
-overwriting. Run `/colab pull` to get the Colab version first.
+bcagent downloads the notebook into `colab/<name>.py` (one `# %%` line per cell). You ask for changes
+and approve them as usual, and bcagent uploads each approved change to Colab. Unchanged cells keep
+their outputs. **Reload the Colab tab** to see the changes, and don't edit the same notebook in
+Colab at the same time. If the notebook changed in Colab meanwhile, bcagent asks before
+overwriting (`/colab pull` gets the Colab version).
 
-| Command | Action |
-|---------|--------|
-| `/colab <url>` | link a notebook (also `bcagent --colab <url> "prompt"`, which works with `-p`) |
-| `/colab pull` / `/colab push [--force]` | download from / upload to Colab |
-| `/colab open`, `/colab list`, `/colab unlink` | open in the browser, show linked notebooks, stop syncing |
-| `/colab login`, `/colab logout` | sign in to / out of Google (also `bcagent colab login`) |
+| Command | What it does |
+|---------|--------------|
+| `/colab <url>` | link a notebook (also `bcagent --colab <url> "request"`) |
+| `/colab pull` · `/colab push [--force]` | download from / upload to Colab |
+| `/colab open` · `/colab list` · `/colab unlink` | open in the browser · linked notebooks · stop syncing |
+| `/colab login` · `/colab logout` | sign in to / out of Google |
 
-**Signing in to Google.** The first `/colab` asks you to sign in and walks you through one of two options:
+**Signing in to Google.** The first `/colab` walks you through it:
 
-- **Permanent (recommended, about 5 minutes once):** you create a free Google Cloud project with the
-  Drive API turned on and a *Desktop app* OAuth client, then give bcagent the downloaded
-  `client_secret_….json`. bcagent opens the browser so you can sign in, then renews the access by
-  itself. Google shows *"Google hasn't verified this app"* because the app is your own: click
-  **Continue**. In testing mode Google asks you to sign in again every 7 days. Click **Publish app** on
-  the consent screen's Audience page to avoid that.
-- **Quick (1 minute, lasts 1 hour):** in the [OAuth 2.0 Playground](https://developers.google.com/oauthplayground),
-  authorize the scope `https://www.googleapis.com/auth/drive`, exchange the code for tokens and paste the
-  access token.
+- **Permanent** (recommended, about 5 minutes once): create a free Google Cloud project with the
+  Drive API and a *Desktop app* OAuth client, and give bcagent the downloaded
+  `client_secret_….json`. bcagent opens the browser to sign in and renews access by itself. Google
+  shows *"Google hasn't verified this app"* because the app is your own: click **Continue**.
+- **Quick** (1 minute, lasts 1 hour): get an access token from the
+  [OAuth 2.0 Playground](https://developers.google.com/oauthplayground) with the scope
+  `https://www.googleapis.com/auth/drive` and paste it.
 
-You can also set `BCAGENT_GOOGLE_TOKEN` to an access token yourself. Credentials are stored only on your
-computer, in `~/.bcagent/google/` (readable only by you). bcagent asks for Drive access because Colab
-notebooks are Drive files, and it only opens the notebooks you link. For a notebook on GitHub, or one
-you can only view, choose **File ▸ Save a copy in Drive** in Colab and link the copy.
+Credentials stay on your computer in `~/.bcagent/google/`. For a notebook on GitHub, or one you can
+only view, choose **File ▸ Save a copy in Drive** in Colab and link the copy.
 
-## Project layout
+---
+
+## Safety and privacy
+
+- **Your code stays on your computer.** The model runs locally through Ollama. bcagent connects to
+  the internet only for things you ask for: downloading models and libraries, checking for updates,
+  GitHub, Google Colab, MCP servers that fetch web pages, and bug reports you choose to send.
+- **You approve every change** to your files and every command (unless you turn on auto-accept).
+  `/undo` reverts the last change, and bcagent never writes outside the folder you started it in.
+- **Big files are protected.** Small models see only part of a long file. If the agent tries to
+  rewrite a file it saw only partly, which would delete the rest, bcagent refuses and suggests what
+  to do. The same happens when it would shrink a file it never saw.
+- **Tests stay honest.** While fixing failing tests, bcagent doesn't let the model edit the test
+  files.
+- **Secrets stay private.** Secret-looking files aren't committed without your confirmation, and
+  tokens are stored only in `~/.bcagent` (readable only by you).
+
+### Reporting bugs
+
+If something goes wrong inside bcagent, it keeps running and asks whether you want to report it.
+You see the complete report before anything is sent. Your home folder is replaced with `~`,
+tokens, keys and email addresses are removed, and your prompt is included only if you say yes.
+With a GitHub sign-in the report becomes an
+[issue](https://github.com/PedroBSB/Bellevue-College-Agent-Capstone/issues) from your account. If
+the same problem is already reported, it becomes a comment there instead. Without a sign-in,
+bcagent opens a pre-filled issue page in your browser. Report something yourself with
+`/bug what happened` or `bcagent bug "…"`. Choose *don't ask again* to stop the question.
+
+---
+
+## Updates
+
+bcagent updates itself. When it starts, it checks the latest
+[release](https://github.com/PedroBSB/Bellevue-College-Agent-Capstone/releases) (at most every 6 hours,
+3-second limit, so being offline doesn't slow it down). When a newer one exists, it upgrades and
+restarts. Every release must first pass the automated tests on macOS, Linux and Windows.
+
+```bash
+bcagent update                  # check and update now (also /update in a session)
+bcagent update --list           # all releases
+bcagent update --to 1.5.0       # go back to an older version (pauses automatic updates)
+bcagent update                  # return to the latest and resume automatic updates
+```
+
+Turn automatic updates off with `"auto_update": false` in the settings or `BCAGENT_NO_UPDATE=1`.
+
+---
+
+## Settings
+
+Settings live in `~/.bcagent/config.json` (on Windows `%USERPROFILE%\.bcagent\config.json`):
+
+| Setting | Default | Meaning |
+|---------|---------|---------|
+| `agent` | `"bulldog"` | default agent |
+| `num_ctx` | `8192` | context size in tokens: how much the model can see at once (bigger = more memory) |
+| `max_tokens` | `4096` | longest answer |
+| `max_repairs` | `2` | automatic fix attempts after a syntax error |
+| `ollama_host` | `null` | Ollama address (default `http://127.0.0.1:11434`) |
+| `default_packages` | numpy, pandas, scikit-learn, statsmodels, statsformula | libraries for your code (`[]` = none) |
+| `learn_mode` | `false` | start every session in learning mode |
+| `bug_reports` | `true` | offer to report internal errors |
+| `auto_update` | `true` | update automatically |
+| `pinned_version` | – | set by `bcagent update --to`; pauses automatic updates |
+
+| Environment variable | Effect |
+|----------------------|--------|
+| `BCAGENT_HOME` | move `~/.bcagent` somewhere else |
+| `BCAGENT_LEARN=1` | learning mode on |
+| `BCAGENT_NO_UPDATE=1` · `BCAGENT_NO_PACKAGES=1` | skip the update check · skip the library check |
+| `GH_TOKEN` / `GITHUB_TOKEN` · `BCAGENT_GOOGLE_TOKEN` | GitHub · Google access token |
+| `OLLAMA_HOST` | Ollama address |
+
+---
+
+## Troubleshooting
+
+| Problem | Try |
+|---------|-----|
+| `bcagent: command not found` | open a **new** terminal (the installer added it to your PATH), or run `~/.local/bin/bcagent` |
+| "Ollama is not running" | start the Ollama app (or run `ollama serve`), then `bcagent doctor` |
+| answers are wrong or ignore your file | mention the file with `@file.py`; keep requests small; try `bcagent -a bulldog-3b` |
+| "Not applied … the file is too long" | ask about one function (*"fix load_data in @big.py"*), or use `bulldog-3b`, which makes small edits |
+| "No module named …" when running code | accept bcagent's offer to install it, or run `bcagent packages` |
+| the agent doesn't use MCP tools | use a bigger agent (`bulldog-3b`+) and say *"use the … tool"* |
+| push fails with "Permission denied (publickey)" | `/github ssh` (or switch to HTTPS when bcagent offers) |
+| "pytest failed to start" | your Python has a broken pytest plugin; create a project venv: `python -m venv .venv`, then `.venv/bin/pip install pytest` |
+| anything else | `bcagent doctor`, then `/bug what happened` |
+
+---
+
+## Development
+
+```bash
+git clone https://github.com/PedroBSB/Bellevue-College-Agent-Capstone.git && cd Bellevue-College-Agent-Capstone
+python -m venv .venv && .venv/bin/pip install -e . pytest
+.venv/bin/python -m pytest -q tests     # ~70 tests, offline; never touches your accounts or ~/.ssh
+```
+
+**Releasing:** bump the version in `bcagent/__init__.py` and `pyproject.toml`, commit, then
+`git tag v1.6.0 && git push origin main v1.6.0`. The `release` workflow runs the tests on macOS,
+Linux and Windows, checks that the tag matches the version, and publishes the GitHub release.
+Installed copies update only after that.
 
 ```
 bcagent/
 ├── install.sh / install.ps1 / install.bat    installers (macOS+Linux / Windows)
 ├── uninstall.sh / uninstall.bat
 ├── pyproject.toml
-├── tests/                                    pytest suite (run in CI on macOS, Linux and Windows)
+├── tests/                                    pytest suite (CI on macOS, Linux and Windows)
 ├── .github/workflows/                        ci.yml (tests) · release.yml (tag vX.Y.Z → tested release)
 └── bcagent/
-    ├── cli.py        argument parsing, REPL, slash commands, `agents`, `mcp` and `doctor` subcommands
-    ├── session.py    the agent loop: prompt → model → edits → approval → check → repair
-    ├── edits.py      parses the model's answer into file edits and shell commands
-    ├── project.py    file tree, BCAGENT.md memory, choosing relevant files for context
-    ├── agents.py     built-in agent, catalog, installing custom agents
-    ├── mcp.py        MCP client, public server catalog, ~/.bcagent/mcp.json
-    ├── git.py        /git and /github: git commands, GitHub sign-in, repos and pull requests
-    ├── colab.py      Google Colab: guided Google sign-in, Drive API, notebook ↔ `# %%` file sync
+    ├── cli.py        command line, interactive prompt, slash commands, subcommands
+    ├── session.py    the agent loop: prompt → model → edits → approval → check → repair; /test /review /export
+    ├── edits.py      turns the model's answer into file edits and shell commands
+    ├── project.py    file tree, BCAGENT.md notes, picking relevant files, notebook view
+    ├── agents.py     built-in agent, catalog, installing and creating agents
     ├── actions.py    plain-language requests → built-in actions (commit, push, tests, colab…)
-    ├── packages.py   default libraries for your code (numpy, pandas, scikit-learn, statsmodels, statsformula)
+    ├── mcp.py        MCP client, public server catalog, ~/.bcagent/mcp.json
+    ├── git.py        /git and /github: git commands, GitHub and SSH sign-in, repos, pull requests
+    ├── colab.py      Google Colab: Google sign-in, Drive API, notebook ↔ `# %%` sync
+    ├── packages.py   default libraries for your code
     ├── report.py     bug reports to GitHub issues (scrubbed, previewed, from your account)
-    ├── llm.py        Ollama client (Python standard library only, streaming)
+    ├── llm.py        Ollama client (standard library only, streaming)
     ├── ui.py         Bellevue College Blue theme, Bulldog banner, diffs, menus
-    ├── update.py     self-update from GitHub releases, rollback (`--to`), version pinning
+    ├── update.py     self-update from GitHub releases, rollback, version pinning
     └── config.py     ~/.bcagent/config.json
 ```
-
-Configuration lives in `~/.bcagent/config.json`: `num_ctx`, `max_tokens`, `max_repairs`, `ollama_host`,
-the default `agent`, `default_packages`, `learn_mode`, `bug_reports`, `auto_update` and
-`pinned_version`. Set `BCAGENT_HOME` to move it.
-
-## Development
-
-```bash
-python -m venv .venv && .venv/bin/pip install -e . pytest
-.venv/bin/python -m pytest -q tests          # fast, offline; never touches your real accounts or ~/.ssh
-```
-
-**Releasing:** bump the version in `bcagent/__init__.py` and `pyproject.toml`, commit, then
-`git tag v1.6.0 && git push origin main v1.6.0`. The `release` workflow runs the tests on all three
-operating systems, checks that the tag matches the version, and publishes the GitHub release. Users
-update only after that.
-
-## Requirements
-
-- macOS 11+, Windows 10/11, or a modern Linux distribution
-- About 1 GB of free disk space and 2 GB of RAM for the default agent
-
-The installers handle everything else.
 
 ---
 Bellevue College Capstone project. MIT License. The Bulldog mascot and Bellevue College Blue identify

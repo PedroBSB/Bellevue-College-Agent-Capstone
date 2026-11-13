@@ -58,3 +58,12 @@ def test_internal_error_offers_report(make_session, monkeypatch):
     monkeypatch.setattr(cli.report_mod, "offer", lambda e, **k: offered.append(e))
     cli.repl(s, None, {}, None)                  # must not crash
     assert isinstance(offered[0], ZeroDivisionError) and s.last_error[1] == "do something"
+
+
+def test_mcp_add_saves_full_script_path(tmp_path, monkeypatch):
+    from bcagent import mcp
+    monkeypatch.setattr(mcp, "USER_FILE", tmp_path / "mcp.json")
+    (tmp_path / "server.py").write_text("print()")
+    mcp.add("demo", {"command": "python", "args": ["server.py", "--flag"]}, root=tmp_path)
+    saved = mcp._read(tmp_path / "mcp.json")["demo"]["args"]
+    assert saved == [str((tmp_path / "server.py").resolve()), "--flag"]
