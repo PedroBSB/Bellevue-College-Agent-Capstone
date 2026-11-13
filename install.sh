@@ -4,6 +4,7 @@
 #
 #   ./install.sh                 # full install
 #   ./install.sh --no-model      # skip downloading the model (downloads on first run instead)
+#   ./install.sh --no-packages   # skip numpy, pandas, scikit-learn, statsmodels, statsformula (installed on first run)
 #   ./install.sh --user          # never use sudo: Python and Ollama go into ~/.bcagent if missing
 #                                #   (done automatically when you are not an administrator)
 #   ./install.sh --uninstall     # remove bcagent (keeps settings, Ollama and Python)
@@ -18,7 +19,7 @@ REPO_ZIP="https://github.com/PedroBSB/Bellevue-College-Agent-Capstone/archive/re
 BCAGENT_HOME="${BCAGENT_HOME:-$HOME/.bcagent}"
 MODEL="${BCAGENT_MODEL:-qwen2.5-coder:0.5b}"
 BIN_DIR="$HOME/.local/bin"
-PY_MIN_MINOR=9
+PY_MIN_MINOR=10   # statsformula (a default library) needs Python 3.10+
 SKIP_MODEL=0
 ASSUME_YES=0
 USER_ONLY=0
@@ -161,11 +162,12 @@ done
 for arg in "$@"; do
   case "$arg" in
     --no-model) SKIP_MODEL=1 ;;
+    --no-packages) SKIP_PACKAGES=1 ;;
     --user|--no-sudo) USER_ONLY=1; pick_sudo ;;
     -y|--yes) ;;
     --uninstall) uninstall ;;
     --uninstall-all|--all) uninstall_all ;;
-    -h|--help) sed -n '2,16p' "$0"; exit 0 ;;
+    -h|--help) sed -n '2,17p' "$0"; exit 0 ;;
     *) die "unknown option $arg" ;;
   esac
 done
@@ -194,7 +196,7 @@ linux_pkg_install() {  # install packages with whatever package manager exists (
   else return 1; fi
 }
 
-python_ok() {  # python_ok CMD -> true if CMD is Python >= 3.9 with venv
+python_ok() {  # python_ok CMD -> true if CMD is Python >= 3.10 with venv
   "$1" -c "import sys, venv; sys.exit(0 if sys.version_info >= (3, $PY_MIN_MINOR) else 1)" >/dev/null 2>&1
 }
 
@@ -203,7 +205,7 @@ find_python() {
     if [ -x "$c" ] && python_ok "$c"; then echo "$c"; return 0; fi
   done
   [ "${BCAGENT_PRIVATE_PYTHON:-0}" = "1" ] && return 1
-  for c in python3.13 python3.12 python3.11 python3.10 python3.9 python3 python \
+  for c in python3.13 python3.12 python3.11 python3.10 python3 python \
            /opt/homebrew/bin/python3 /usr/local/bin/python3 \
            /Library/Frameworks/Python.framework/Versions/Current/bin/python3; do
     if have "$c" || [ -x "$c" ]; then
@@ -276,7 +278,7 @@ install_python() {
     find_python >/dev/null && return 0
   fi
   [ "$HAS_ADMIN" = "1" ] && warn "system install of Python did not work – falling back to a private Python"
-  install_python_user || die "could not install Python automatically – please install Python 3.9+ and re-run"
+  install_python_user || die "could not install Python automatically – please install Python 3.10+ and re-run"
 }
 
 banner
@@ -304,7 +306,7 @@ if ! "$PY" -m venv "$BCAGENT_HOME/venv" >/dev/null 2>&1; then
   if ! { { linux_pkg_install "python${PYV}-venv" 2>/dev/null || linux_pkg_install python3-venv; } >/dev/null 2>&1 \
          && "$PY" -m venv "$BCAGENT_HOME/venv" >/dev/null 2>&1; }; then
     rm -rf "$BCAGENT_HOME/venv"
-    install_python_user || die "could not install Python automatically – please install Python 3.9+ and re-run"
+    install_python_user || die "could not install Python automatically – please install Python 3.10+ and re-run"
     PY="$(BCAGENT_PRIVATE_PYTHON=1 find_python || true)"
     [ -n "$PY" ] || die "could not find the private Python"
     ok "Python: $PY"
@@ -430,6 +432,13 @@ curl -fs http://127.0.0.1:11434/api/version >/dev/null 2>&1 && ok "Ollama server
 if [ "$SKIP_MODEL" -eq 0 ]; then
   say "Downloading the default model $MODEL (~400 MB, smallest & fastest local code LLM)"
   "$OLLAMA" pull "$MODEL" && ok "model $MODEL ready" || warn "model download failed – it will download on first run"
+fi
+
+# ---------------------------------------------------------------- 5. default libraries
+if [ "${SKIP_PACKAGES:-0}" -eq 0 ]; then
+  say "Installing the default Python libraries for your code: numpy, pandas, scikit-learn, statsmodels, statsformula"
+  "$BCAGENT_HOME/venv/bin/bcagent" packages && ok "libraries ready" \
+    || warn "some libraries could not be installed – bcagent tries again when it starts"
 fi
 
 echo

@@ -6,9 +6,10 @@
 #
 #   powershell -ExecutionPolicy Bypass -File install.ps1            # full install
 #   powershell -ExecutionPolicy Bypass -File install.ps1 -NoModel   # skip model download
+#   powershell -ExecutionPolicy Bypass -File install.ps1 -NoPackages   # skip numpy/pandas/scikit-learn/statsmodels/statsformula
 #   powershell -ExecutionPolicy Bypass -File install.ps1 -Uninstall
 #   powershell -ExecutionPolicy Bypass -File install.ps1 -UninstallAll   (removes EVERYTHING incl. Ollama; -Yes skips the question)
-param([switch]$NoModel, [switch]$Uninstall, [switch]$UninstallAll, [switch]$Yes)
+param([switch]$NoModel, [switch]$NoPackages, [switch]$Uninstall, [switch]$UninstallAll, [switch]$Yes)
 
 $ErrorActionPreference = "Stop"
 $ProgressPreference = "SilentlyContinue"   # makes Invoke-WebRequest much faster
@@ -132,7 +133,7 @@ function Find-Python {
   foreach ($cand in $candidates) {
     try {
       $exe = $cand[0]; $pyArgs = @($cand | Select-Object -Skip 1)
-      & $exe @pyArgs -c "import sys, venv; sys.exit(0 if sys.version_info >= (3, 9) else 1)" 2>$null
+      & $exe @pyArgs -c "import sys, venv; sys.exit(0 if sys.version_info >= (3, 10) else 1)" 2>$null
       if ($LASTEXITCODE -eq 0) {
         return (& $exe @pyArgs -c "import sys; print(sys.executable)").Trim()
       }
@@ -158,7 +159,7 @@ function Install-PrivatePython {
 
 $Py = Find-Python
 if (-not $Py) {
-  Say "Python 3.9+ not found - installing Python $PyVersion"
+  Say "Python 3.10+ not found - installing Python $PyVersion"
   if (Get-Command winget -ErrorAction SilentlyContinue) {
     try {
       winget install --id Python.Python.3.12 -e --scope user --silent --accept-package-agreements --accept-source-agreements
@@ -183,7 +184,7 @@ if (-not $Py) {
     Warn "falling back to a private Python just for bcagent"
     if (Install-PrivatePython) { $Py = Find-Python }
   }
-  if (-not $Py) { Die "could not install Python - install Python 3.9+ from https://www.python.org and re-run install.bat" }
+  if (-not $Py) { Die "could not install Python - install Python 3.10+ from https://www.python.org and re-run install.bat" }
 }
 Ok "Python: $Py"
 
@@ -284,6 +285,13 @@ if (-not $NoModel) {
   Say "Downloading the default model $Model (~400 MB, smallest & fastest local code LLM)"
   & $Ollama pull $Model
   if ($LASTEXITCODE -eq 0) { Ok "model $Model ready" } else { Warn "model download failed - it will download on first run" }
+}
+
+# ------------------------------------------------------------------ 5. default libraries
+if (-not $NoPackages) {
+  Say "Installing the default Python libraries for your code: numpy, pandas, scikit-learn, statsmodels, statsformula"
+  & "$BcHome\venv\Scripts\bcagent.exe" packages
+  if ($LASTEXITCODE -eq 0) { Ok "libraries ready" } else { Warn "some libraries could not be installed - bcagent tries again when it starts" }
 }
 
 Write-Host ""

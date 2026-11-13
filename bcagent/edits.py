@@ -45,6 +45,8 @@ class Edit:
     old: Optional[str] = None      # None -> new file
     error: Optional[str] = None
     warning: Optional[str] = None
+    whole: bool = False            # the model rewrote the complete file (not SEARCH/REPLACE)
+    blocked: bool = False          # refused for safety (not something the model can repair)
 
     @property
     def is_new(self) -> bool:
@@ -174,7 +176,9 @@ def _current(project: Project, path: str) -> Optional[str]:
         p = project.resolve(path)
     except ValueError:
         return None
-    return p.read_text(encoding="utf-8", errors="replace") if p.is_file() else None
+    if not p.is_file():
+        return None
+    return project.read(path)  # notebooks as `# %%` text
 
 
 def parse_response(text: str, project: Project):
@@ -191,6 +195,7 @@ def parse_response(text: str, project: Project):
             if b.body.strip():
                 orphans.append(b)
             continue
+        b.path = strip_root_prefix(project, b.path)
         try:
             project.resolve(b.path)
         except ValueError as e:
@@ -209,10 +214,19 @@ def parse_response(text: str, project: Project):
                 e.new = out
         else:
             e.new = b.body.rstrip("\n") + "\n"
+            e.whole = True
             if not e.is_new and LAZY_RE.search(e.new):
                 e.warning = "the model may have left out parts of the file"
     result = [e for e in edits.values() if e.error or e.new != (e.old or "") or e.is_new]
     return result, commands, orphans
+
+
+def strip_root_prefix(project: Project, path: str) -> str:
+    """Small models often write `myproject/calc.py` for calc.py because the prompt names the folder."""
+    first, _, rest = path.partition("/")
+    if rest and first == project.root.name and not (project.root / first).exists():
+        return rest
+    return path
 
 
 def _commands_from(b: Block) -> List[str]:
@@ -237,13 +251,58 @@ def _commands_from(b: Block) -> List[str]:
     return cmds
 
 
+def raw_text(project: Project, path: str) -> Optional[str]:
+    """The file exactly as it is on disk (for undo)."""
+    try:
+        p = project.resolve(path)
+    except ValueError:
+        return None
+    return p.read_text(encoding="utf-8", errors="replace") if p.is_file() else None
+
+
 def write_edit(project: Project, edit: Edit) -> None:
+    import os
     p = project.resolve(edit.path)
     p.parent.mkdir(parents=True, exist_ok=True)
-    p.write_text(edit.new, encoding="utf-8")
+    before = p.stat().st_mtime if p.is_file() else None
+    text = edit.new
+    if edit.path.lower().endswith(".ipynb") and not text.lstrip().startswith("{"):
+        import json
+        from .colab import merge_cells, text_to_cells
+        base = {}
+        if p.is_file():
+            try:
+                base = json.loads(p.read_text(encoding="utf-8"))
+            except ValueError:
+                base = {}
+        if not base:
+            base = {"nbformat": 4, "nbformat_minor": 5, "cells": [],
+                    "metadata": {"kernelspec": {"name": "python3", "display_name": "Python 3",
+                                                "language": "python"},
+                                 "language_info": {"name": "python"}}}
+        cells = text_to_cells(text) or [("code", text.strip())]
+        text = json.dumps(merge_cells(base, cells), indent=1, ensure_ascii=False) + "\n"
+    p.write_text(text, encoding="utf-8")
+    if p.suffix == ".py" and before is not None:
+        # Python reuses cached bytecode when the source size and mtime (whole seconds) look unchanged,
+        # so a same-length fix written within the same second would still run the old code. The cache
+        # can live anywhere (__pycache__, or ~/Library/Caches with Apple's Python), so make sure the
+        # timestamp moves forward instead.
+        if int(p.stat().st_mtime) <= int(before):
+            t = int(before) + 1
+            try:
+                os.utime(p, (t, t))
+            except OSError:
+                pass
 
 
 def check_python(project: Project, path: str) -> Optional[str]:
+    if path.lower().endswith(".ipynb"):
+        from .colab import check_source
+        try:
+            return check_source(project.read(path), path)
+        except (OSError, ValueError) as e:
+            return str(e)
     if not path.endswith(".py"):
         return None
     try:

@@ -119,6 +119,8 @@ def text_to_cells(text: str) -> List[Tuple[str, str]]:
             cells[-1][1].append(line)
     out = []
     for kind, lines in cells:
+        if kind == "markdown" and any(l.strip() and not l.lstrip().startswith("#") for l in lines):
+            kind = "code"  # small models sometimes put code under a markdown marker: keep it as code
         if kind != "code":
             lines = [l[2:] if l.startswith("# ") else (l[1:] if l.startswith("#") else l) for l in lines]
         while lines and not lines[0].strip():

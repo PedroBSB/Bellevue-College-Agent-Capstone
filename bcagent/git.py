@@ -586,6 +586,10 @@ class Repo:
         out = self.run("status", "--porcelain", "-uall")[1]
         return [(l[:2], l[3:].strip('"')) for l in out.splitlines() if l.strip()]
 
+    def dirty(self) -> bool:
+        """Uncommitted changes to tracked files (untracked files don't block revert/merge)."""
+        return bool(self.run("status", "--porcelain", "-uno")[1])
+
     def ahead_behind(self) -> Tuple[int, int]:
         if not self.upstream():
             return 0, 0
@@ -890,9 +894,15 @@ class GitCommands:
             if secrets_:
                 console.print("[warn]⚠ these files may contain passwords or keys:[/] " + ", ".join(secrets_) +
                               "\n  [muted]Add them to .gitignore so they never reach GitHub.[/]")
-                if not self.confirm("Commit them anyway?", "Yes, they're safe"):
+                keep_out = (not ui.is_interactive() or
+                            ui.choose("Commit them anyway?", ["No, leave them out", "Yes, they're safe"]) == 0)
+                if keep_out:
+                    console.print("  [muted]⎿  left out: " + ", ".join(secrets_) + "[/]")
                     r.run("add", "-A")
-                    r.run("reset", "-q", "--", *secrets_)
+                    if r.has_commits():
+                        r.run("reset", "-q", "--", *secrets_)
+                    else:  # no HEAD yet
+                        r.run("rm", "-q", "--cached", "--", *secrets_)
                 else:
                     r.run("add", "-A")
             else:
@@ -1050,7 +1060,7 @@ class GitCommands:
         info = r.out("log", "-1", "--format=%h %s (%ar)", target)
         console.print(f"[bold]Revert[/] {escape(info)}\n[muted]This adds a new commit that undoes it; history "
                       "is kept, so it is safe even after pushing.[/]")
-        if r.changes():
+        if r.dirty():
             raise GitError("commit or stash your current changes first ([bc]/git commit[/] or [bc]/git stash[/])")
         if not self.confirm("Revert this commit?"):
             return

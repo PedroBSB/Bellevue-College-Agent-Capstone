@@ -169,7 +169,8 @@ TIPS = [
     "Mention files with [bc]@file.py[/] to give bcagent context",
     "Run [bc]/init[/] to create a BCAGENT.md with notes about your project",
     "[bc]shift+tab[/] auto-accepts edits · [bc]![/]cmd runs a shell command",
-    "Install more agents: [bc]/agents catalog[/] then [bc]/install bulldog-1.5b[/]",
+    "Just say [bc]commit and push[/] or [bc]run the tests[/] · [bc]/learn[/] for hints instead of answers",
+    "numpy, pandas, scikit-learn, statsmodels and statsformula are ready to use",
 ]
 
 

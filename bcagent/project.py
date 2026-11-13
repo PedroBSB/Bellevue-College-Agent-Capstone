@@ -21,10 +21,23 @@ TEXT_EXT = {
 }
 CODE_EXT = {".py", ".pyi", ".js", ".ts", ".html", ".css", ".sql", ".sh", ".toml", ".cfg", ".txt", ".md"}
 SPECIAL_NAMES = {"Makefile", "Dockerfile", "Procfile", "LICENSE", "README", ".gitignore", ".env.example"}
-LANG = {".py": "python", ".js": "javascript", ".ts": "typescript", ".html": "html", ".css": "css",
+LANG = {".py": "python", ".ipynb": "python", ".js": "javascript", ".ts": "typescript", ".html": "html", ".css": "css",
         ".json": "json", ".md": "markdown", ".sh": "bash", ".sql": "sql", ".toml": "toml",
         ".yaml": "yaml", ".yml": "yaml", ".ps1": "powershell", ".bat": "bat"}
 MEMORY_FILE = "BCAGENT.md"
+
+
+def notebook_view(raw: str, name: str) -> str:
+    """A .ipynb file as Python text with `# %%` cells (what the model reads and writes)."""
+    import json
+    from .colab import notebook_to_text
+    try:
+        nb = json.loads(raw)
+    except ValueError:
+        return raw
+    if not isinstance(nb, dict) or "cells" not in nb:
+        return raw
+    return notebook_to_text(nb, name).replace("# Google Colab notebook:", "# Jupyter notebook:", 1)
 
 
 def lang_for(path: str) -> str:
@@ -35,6 +48,8 @@ class Project:
     def __init__(self, root):
         self.root = Path(root).resolve()
         self.pinned: List[str] = []
+        self.truncated: dict = {}   # files shown only partly in the last prompt: {path: (shown, total) lines}
+        self.seen: set = set()      # files the model has seen in full (or written) this session
 
     # -- paths ----------------------------------------------------------------
     def rel(self, p: Path) -> str:
@@ -111,7 +126,10 @@ class Project:
         return [p for _, p in scored[:limit]]
 
     def read(self, rel: str, max_chars: int = 0) -> str:
+        """File content as the model sees it (Jupyter notebooks as `# %%` cells)."""
         text = self.resolve(rel).read_text(encoding="utf-8", errors="replace")
+        if rel.lower().endswith(".ipynb"):
+            text = notebook_view(text, Path(rel).name)
         if max_chars and len(text) > max_chars:
             text = text[:max_chars] + "\n... (truncated)\n"
         return text
@@ -185,13 +203,21 @@ class Project:
             parts.append("Project notes (BCAGENT.md):\n" + mem[:3000])
         used = sum(len(p) for p in parts)
         included: List[str] = []
+        self.truncated = {}
         for f in self.relevant(prompt):
             if not self.is_text(f):
                 continue
             try:
-                body = self.read(f, max_chars=max(1500, budget - used - 200))
+                full = self.read(f)
             except OSError:
                 continue
+            limit = max(1500, budget - used - 200)
+            if len(full) > limit:
+                body = full[:limit] + "\n... (truncated)\n"
+                self.truncated[f] = (full[:limit].count("\n"), full.count("\n") + 1)
+            else:
+                body = full
+                self.seen.add(f)
             block = f"FILE: {f}\n```{lang_for(f)}\n{body.rstrip()}\n```"
             if used + len(block) > budget and included:
                 break

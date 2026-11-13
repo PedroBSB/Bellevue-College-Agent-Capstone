@@ -1,0 +1,31 @@
+name: release
+
+# Push a tag like v1.6.0 to publish a release. bcagent installs only update to published releases,
+# so a release goes out only after the tests pass on macOS, Linux and Windows.
+on:
+  push:
+    tags: ["v*"]
+
+permissions:
+  contents: write
+
+jobs:
+  tests:
+    uses: ./.github/workflows/ci.yml
+
+  release:
+    needs: tests
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Tag matches bcagent/__init__.py and pyproject.toml
+        run: |
+          TAG="${GITHUB_REF_NAME#v}"
+          CODE=$(python3 -c "import re;print(re.search(r'__version__ = \"(.*)\"', open('bcagent/__init__.py').read()).group(1))")
+          PROJ=$(python3 -c "import re;print(re.search(r'^version = \"(.*)\"', open('pyproject.toml').read(), re.M).group(1))")
+          echo "tag $TAG · __init__ $CODE · pyproject $PROJ"
+          test "$TAG" = "$CODE" && test "$TAG" = "$PROJ"
+      - name: Publish the GitHub release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: gh release create "$GITHUB_REF_NAME" --title "bcagent $GITHUB_REF_NAME" --generate-notes --verify-tag

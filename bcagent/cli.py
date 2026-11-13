@@ -12,7 +12,7 @@ from rich.markup import escape
 from rich.progress import BarColumn, DownloadColumn, Progress, TextColumn, TransferSpeedColumn
 from rich.table import Table
 
-from . import __version__, agents as agents_mod, colab as colab_mod, git as git_mod, mcp as mcp_mod, ui, update as update_mod
+from . import __version__, actions as actions_mod, agents as agents_mod, colab as colab_mod, git as git_mod, packages as packages_mod, report as report_mod, mcp as mcp_mod, ui, update as update_mod
 from .agents import CATALOG, Agent, all_agents
 from .config import AGENTS_DIR, CONFIG_FILE, HISTORY_FILE, load_config, save_config
 from .llm import Ollama, OllamaError
@@ -34,13 +34,20 @@ COMMANDS = [
     ("/git", "Git: /git [status|diff|commit|push|pull|log|branch|switch|merge|revert|uncommit|init|clone|...]"),
     ("/github", "GitHub: /github [login|logout|status|create|pr|prs|open|clone]"),
     ("/colab", "Edit a Google Colab notebook: /colab <url> [pull|push|open|list|unlink|login|logout]"),
+    ("/test", "Run the tests (pytest); bcagent offers to fix failures and runs them again"),
+    ("/review", "Get instructor-style feedback on your code: /review [@file ...] (default: changed files)"),
+    ("/learn", "Learning mode on/off: hints and explanations instead of finished code"),
+    ("/export", "Save this session as a Markdown log (to hand in with an assignment)"),
+    ("/resume", "Continue an earlier conversation in this folder"),
+    ("/bug", "Report a problem with bcagent on GitHub: /bug [what happened]"),
+    ("/packages", "Check / install the default libraries (numpy, pandas, scikit-learn, statsmodels, statsformula)"),
     ("/run", "Run a Python file: /run [file.py] [args] (default: the last file bcagent wrote)"),
     ("/undo", "Undo the last set of file edits"),
     ("/auto", "Toggle auto-accept of edits (same as shift+tab)"),
     ("/clear", "Clear conversation history"),
     ("/status", "Show agent, model and Ollama status"),
     ("/doctor", "Check your installation"),
-    ("/update", "Check for a new bcagent version and install it"),
+    ("/update", "Update bcagent: /update [--to <version> | --list]"),
     ("/exit", "Exit bcagent"),
 ]
 
@@ -56,6 +63,8 @@ HELP = """[bold]bcagent[/] – Bellevue College Agent. Type what you want and pr
   [bc]!command[/]     run a shell command (output is shared with bcagent)
   [bc]/git[/]          git status · [bc]/git commit[/] · [bc]/git push[/] · [bc]/git revert[/] … ([bc]/git help[/])
   [bc]/github create[/] put this folder on GitHub · [bc]/github pr[/] open a pull request
+  [bc]/test[/]         run the tests · [bc]/review[/] feedback on your code · [bc]/learn[/] hints instead of answers
+  [bc]/export[/]       save a log of this session · [bc]/resume[/] continue an earlier one · [bc]/bug[/] report a problem
   [bc]/colab[/] url    edit a Google Colab notebook (bcagent helps you sign in to Google)
   [bc]/run[/] file.py  run a Python file (bcagent also offers to run the scripts it writes)
   [bc]↑/↓ enter[/]    pick an option when bcagent asks; or choose [bc]Chat about this[/] to reply
@@ -125,6 +134,7 @@ def doctor(client: Ollama, cfg: dict) -> None:
         t.add_row("updates", f"{ok} up to date")
     else:
         t.add_row("updates", "[muted]could not check (offline?)[/]")
+    t.add_row("libraries", packages_mod.status(cfg))
     t.add_row("config", str(CONFIG_FILE))
     t.add_row("agents dir", str(AGENTS_DIR))
     console.print(t)
@@ -588,6 +598,8 @@ def handle_slash(line: str, session: Session, client: Ollama, cfg: dict) -> bool
         console.print(t)
     elif cmd == "/clear":
         session.history.clear()
+        session.events.clear()
+        session.session_id = __import__("datetime").datetime.now().strftime("%Y%m%d-%H%M%S")
         console.clear()
         console.print("[muted]Conversation cleared.[/]")
     elif cmd == "/agents":
@@ -666,7 +678,7 @@ def handle_slash(line: str, session: Session, client: Ollama, cfg: dict) -> bool
             console.print("usage: [bc]/mcp[/] [list | catalog | add <name|@npm/pkg|pypi:pkg> [KEY=VALUE] "
                           "[--project] | remove <name> | tools [server]]")
     elif cmd == "/update":
-        if update_mod.update_command() == update_mod.UPDATED:
+        if update_mod.update_command(arg.split()) == update_mod.UPDATED:
             console.print("[muted]Restarting bcagent…[/]")
             session.mcp.close()
             update_mod.restart(["-C", str(proj.root), "-a", session.agent.name])
@@ -678,6 +690,33 @@ def handle_slash(line: str, session: Session, client: Ollama, cfg: dict) -> bool
             console.print(f"[err]✗ {e}[/]")
     elif cmd == "/colab":
         handle_colab(arg, session)
+    elif cmd == "/test":
+        session.run_tests(arg)
+    elif cmd == "/review":
+        session.review_code(arg)
+    elif cmd == "/learn":
+        session.learn = (arg == "on") or (arg != "off" and not session.learn)
+        if session.learn:
+            console.print("[ok]✓[/] learning mode [bold]on[/]: bcagent explains and gives hints but doesn't write "
+                          "the solution or edit files. [muted]/learn again to turn it off.[/]")
+        else:
+            console.print("learning mode [bold]off[/]: bcagent writes code and edits files again.")
+    elif cmd == "/export":
+        try:
+            path = session.export(arg)
+            console.print(f"[ok]✓[/] saved the session log to [bc]{proj.rel(path)}[/]")
+        except (OSError, ValueError) as e:
+            console.print(f"[err]✗ {e}[/]")
+    elif cmd == "/resume":
+        resume(session, pick=True)
+    elif cmd == "/bug":
+        last = getattr(session, "last_error", None)
+        err, line_ = last if last else (None, "")
+        report_mod.offer(err, context=f"handling `{line_[:80]}`" if line_ else "", prompt=line_,
+                         session=session, description=arg, ask=False)
+    elif cmd == "/packages":
+        left = packages_mod.ensure(cfg)
+        console.print(packages_mod.status(cfg) if not left else f"[warn]still missing: {', '.join(left)}[/]")
     elif cmd == "/run":
         session.run_file(arg)
     elif cmd == "/undo":
@@ -696,6 +735,61 @@ def handle_slash(line: str, session: Session, client: Ollama, cfg: dict) -> bool
 
 
 EXIT_WORDS = {"quit", "exit", "q", ":q"}
+
+
+def resume(session: Session, pick: bool) -> bool:
+    saved = session.saved_sessions()
+    if not saved:
+        console.print("[muted]No earlier conversations in this folder.[/]")
+        return False
+    data = saved[0]
+    if pick and len(saved) > 1 and ui.is_interactive():
+        from datetime import datetime
+        labels = [f"{datetime.fromtimestamp(d.get('saved', 0)).strftime('%b %d %H:%M')} · "
+                  f"{len(d.get('history', [])) // 2} exchange(s) · {d.get('title') or '(no title)'}"[:100]
+                  for d in saved[:8]]
+        c = ui.choose("Which conversation?", labels + ["Cancel"], cancel=len(labels))
+        if c >= len(labels):
+            return False
+        data = saved[c]
+    session.restore(data)
+    return True
+
+
+def run_request(line: str, session: Session, client: Ollama, cfg: dict) -> None:
+    """A typed request: built-in actions (commit, push, tests, colab…) or a task for the agent."""
+    plan = actions_mod.route(line)
+    if not plan.commands:
+        return session.turn(line)
+    interactive = ui.is_interactive() and not session.print_mode
+    links = [c for c in plan.commands if c.startswith("/colab http")]
+    others = [c for c in plan.commands if c not in links]
+    for c in links:  # a pasted Colab link: link it first, then do the task on it
+        handle_slash(c, session, client, cfg)
+    if plan.action_only and others:
+        shown = " → ".join(others)
+        if interactive:
+            c = ui.choose(f"bcagent can do this itself: [bc]{escape(shown)}[/]",
+                          ["Yes, do it", "No, send my message to the agent instead"], cancel=1)
+            if c == 1:
+                return session.turn(line)
+        elif not session.auto:
+            return session.turn(line)
+        for cmd in others:
+            handle_slash(cmd, session, client, cfg)
+        return None
+    if plan.rest:
+        session.turn(plan.rest)
+    if others:
+        shown = " → ".join(others)
+        if interactive:
+            if ui.choose(f"You also asked to [bc]{escape(shown)}[/]. Do it now?", ["Yes", "No"], cancel=1) != 0:
+                return None
+        elif not session.auto:
+            return None
+        for cmd in others:
+            handle_slash(cmd, session, client, cfg)
+    return None
 
 
 def repl(session: Session, client: Ollama, cfg: dict, first: Optional[str]) -> None:
@@ -724,11 +818,19 @@ def repl(session: Session, client: Ollama, cfg: dict, first: Optional[str]) -> N
                 session.notes.append(f"I ran `{line[1:].strip()}` (exit code {code}). Output:\n```\n"
                                      f"{out[-2500:]}\n```")
             else:
-                session.turn(line)
+                run_request(line, session, client, cfg)
         except KeyboardInterrupt:
             console.print("  [warn]⎿  Interrupted[/]")
         except OllamaError as e:
             console.print(f"[err]✗ {e}[/]")
+        except Exception as e:  # a bug in bcagent: keep the session alive and offer to report it
+            session.last_error = (e, line)
+            console.print(f"[err]✗ Something went wrong inside bcagent: {escape(type(e).__name__)}: "
+                          f"{escape(str(e)[:200])}[/]")
+            try:
+                report_mod.offer(e, context=f"handling `{line[:80]}`", prompt=line, session=session)
+            except Exception:
+                pass
         console.print()
     console.print("\n[bc]Go Bulldogs! 🐾[/]")
 
@@ -741,6 +843,8 @@ def main(argv: Optional[List[str]] = None) -> None:
         os.system("")  # enable ANSI colors on old Windows consoles
     cfg = load_config()
     client = Ollama(cfg.get("ollama_host"))
+    if ui.is_interactive():
+        sys.excepthook = report_mod.crash_hook
 
     if argv and argv[0] == "agents":
         sys.exit(agents_command(argv[1:], client, cfg))
@@ -759,8 +863,13 @@ def main(argv: Optional[List[str]] = None) -> None:
     if argv and argv[0] == "doctor":
         doctor(client, cfg)
         return
+    if argv and argv[0] == "packages":
+        sys.exit(packages_mod.command(argv[1:]))
+    if argv and argv[0] == "bug":
+        report_mod.offer(None, description=" ".join(argv[1:]), ask=False)
+        return
     if argv and argv[0] == "update":
-        code = update_mod.update_command()
+        code = update_mod.update_command(argv[1:])
         sys.exit(0 if code == update_mod.UPDATED else code)
 
     p = argparse.ArgumentParser(
@@ -770,7 +879,7 @@ def main(argv: Optional[List[str]] = None) -> None:
         epilog="Other commands: `bcagent agents [list|catalog|install|remove|use|create]`, "
                "`bcagent mcp [list|catalog|add|remove|tools]`, `bcagent colab [login|logout|list|link|pull|push]`, "
                "`bcagent github [login|status|create|pr]`, `bcagent git <command>`, "
-               "`bcagent doctor`, `bcagent update`")
+               "`bcagent doctor`, `bcagent packages`, `bcagent update [--to X.Y.Z | --list]`, `bcagent bug`")
     p.add_argument("prompt", nargs="*", help="initial prompt")
     p.add_argument("-p", "--print", action="store_true", dest="print_mode",
                    help="non-interactive: answer the prompt, print the result and exit")
@@ -779,6 +888,10 @@ def main(argv: Optional[List[str]] = None) -> None:
     p.add_argument("-m", "--model", help="override the Ollama model for this run")
     p.add_argument("-C", "--cwd", default=".", help="project folder (default: current folder)")
     p.add_argument("--colab", metavar="URL", help="link a Google Colab notebook and edit it")
+    p.add_argument("--learn", action="store_true", help="learning mode: hints and explanations, no finished code")
+    p.add_argument("-c", "--continue", action="store_true", dest="cont",
+                   help="continue the most recent conversation in this folder")
+    p.add_argument("-r", "--resume", action="store_true", help="pick an earlier conversation to continue")
     p.add_argument("-v", "--version", action="version", version=f"bcagent {__version__}")
     a = p.parse_args(argv)
 
@@ -807,7 +920,16 @@ def main(argv: Optional[List[str]] = None) -> None:
     update_mod.maybe_update(cfg, argv, interactive=not a.print_mode and ui.is_interactive())
     if not ensure_model(client, agent.model):
         sys.exit(1)
+    if not a.print_mode:
+        try:
+            packages_mod.ensure(cfg)   # numpy, pandas, scikit-learn, statsmodels, statsformula
+        except Exception as e:  # never block start-up
+            console.print(f"[warn]⚠ could not check the default libraries: {escape(str(e))}[/]")
     session = Session(project, agent, cfg, client, auto=a.yes, print_mode=a.print_mode)
+    if a.learn:
+        session.learn = True
+    if a.cont or a.resume:
+        resume(session, pick=a.resume)
     if a.colab:
         rel = colab_link(session.colab, a.colab, session)
         if not rel:
@@ -816,9 +938,13 @@ def main(argv: Optional[List[str]] = None) -> None:
             prompt += f" (in @{rel})"
     if a.print_mode:
         try:
-            session.turn(prompt)
+            run_request(prompt, session, client, cfg)
         except OllamaError as e:
             ui.err_console.print(f"[err]✗ {e}[/]")
+            sys.exit(1)
+        except Exception as e:
+            ui.err_console.print(f"[err]✗ bcagent error: {type(e).__name__}: {e}[/]\n"
+                                 f"[muted]Please report it: run [bc]bcagent bug[/] or open {report_mod.ISSUES_URL}[/]")
             sys.exit(1)
         finally:
             session.mcp.close()

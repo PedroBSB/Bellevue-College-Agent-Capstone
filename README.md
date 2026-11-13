@@ -42,13 +42,15 @@ What the installer does:
 
 | Step | macOS | Linux | Windows |
 |------|-------|-------|---------|
-| Python 3.9+ (if missing) | Homebrew, or the official python.org `.pkg`; **no admin:** private Python in `~/.bcagent` | apt / dnf / yum / pacman / zypper / apk; **no sudo:** private Python in `~/.bcagent` | winget, or the python.org installer (per user); **blocked:** portable Python in `%USERPROFILE%\.bcagent\python` |
+| Python 3.10+ (if missing) | Homebrew, or the official python.org `.pkg`; **no admin:** private Python in `~/.bcagent` | apt / dnf / yum / pacman / zypper / apk; **no sudo:** private Python in `~/.bcagent` | winget, or the python.org installer (per user); **blocked:** portable Python in `%USERPROFILE%\.bcagent\python` |
 | bcagent + requirements (`rich`, `prompt_toolkit`) | venv in `~/.bcagent/venv` | venv in `~/.bcagent/venv` | venv in `%USERPROFILE%\.bcagent\venv` |
 | `bcagent` command on PATH | `~/.local/bin/bcagent` | `~/.local/bin/bcagent` | `%USERPROFILE%\.bcagent\bin\bcagent.cmd` |
 | Ollama (if missing) | Homebrew, or Ollama.app (`~/Applications` without admin rights) | official `ollama.com/install.sh`; **no sudo:** unpacked into `~/.bcagent/ollama` | winget, or `OllamaSetup.exe`; **blocked:** portable Ollama in `%USERPROFILE%\.bcagent\ollama` |
 | Default model | `ollama pull qwen2.5-coder:0.5b` | same | same |
+| Default libraries for your code | numpy, pandas, scikit-learn, statsmodels, statsformula in `~/.bcagent/runenv` | same | same (`%USERPROFILE%\.bcagent\runenv`) |
 
-Options: `--no-model` / `-NoModel` skips the model download (it then downloads on first run).
+Options: `--no-model` / `-NoModel` skips the model download, and `--no-packages` / `-NoPackages` skips
+the libraries. Both are then installed the first time bcagent starts.
 
 **No administrator rights?** (lab and school computers, accounts without `sudo`.) The installer
 checks whether it can use `sudo`. If it can't, or if a system install fails, it installs whatever is
@@ -77,10 +79,17 @@ uninstall.bat --all           & rem or: install.ps1 -UninstallAll
 
 ## Updates
 
-bcagent keeps itself up to date. When it starts, it compares its version with the one on GitHub. It
-checks at most every 6 hours, and a check takes at most 3 seconds, so being offline doesn't slow it
-down. If a newer version exists, bcagent upgrades itself and restarts with the same arguments. Run
-`bcagent update` (or `/update` in a session) to check right away. To turn automatic updates off, set
+bcagent keeps itself up to date. When it starts, it compares its version with the latest
+[GitHub release](https://github.com/PedroBSB/Bellevue-College-Agent-Capstone/releases). It checks at
+most every 6 hours, and a check takes at most 3 seconds, so being offline doesn't slow it down. If a
+newer release exists, bcagent upgrades itself and restarts with the same arguments. Only tagged
+releases reach users, and each one must first pass the tests on macOS, Linux and Windows. A push to
+`main` alone changes nothing for students. Run `bcagent update` (or `/update` in a session) to check
+right away.
+
+**Going back to an earlier version:** `bcagent update --list` shows the releases, and
+`bcagent update --to 1.5.0` installs one. That also pauses automatic updates. A plain
+`bcagent update` returns to the latest release and turns them back on. To turn automatic updates off, set
 `"auto_update": false` in `~/.bcagent/config.json` or set `BCAGENT_NO_UPDATE=1`. If bcagent wasn't
 installed with the bcagent installer, it only tells you that a new version is available.
 
@@ -95,7 +104,11 @@ bcagent -a tester "write tests for @calc.py"  # use a specific agent
 bcagent -m qwen2.5-coder:1.5b                 # use any Ollama model for this run
 bcagent mcp add fetch                         # add a public MCP server (see below)
 bcagent --colab https://colab.research.google.com/drive/1AbC…   # edit a Google Colab notebook
+bcagent --learn                               # learning mode: hints instead of finished code
+bcagent -c                                    # continue the last conversation here (-r to pick one)
 bcagent doctor                                # check the installation
+bcagent packages                              # check / install the default libraries
+bcagent bug "what went wrong"                 # report a problem on GitHub
 bcagent update                                # update bcagent now (it also updates itself)
 ```
 
@@ -117,8 +130,48 @@ Each request goes through these steps:
    and it asks before running any command. Python code runs with the project's own `.venv` if there
    is one. Otherwise it uses a private environment (`~/.bcagent/runenv`), so `python` and `pip install`
    work even on machines without a system Python or where `pip` is blocked. The output goes back to
-   the agent, and if the script fails you can send the error to the model to fix. Run a file any time
-   with `/run file.py`.
+   the agent, and if the script fails you can send the error to the model to fix. If the error is
+   *No module named X*, bcagent offers to `pip install` it and run the script again. Run a file any
+   time with `/run file.py`.
+
+**Built-in libraries.** Code that bcagent runs can always use **numpy, pandas, scikit-learn,
+statsmodels and statsformula** (R-style formulas, e.g. `sf.dmatrices("y ~ x + C(group)", df)`), and
+the agent knows they are there. bcagent checks at every start, with a fast check that needs no
+network, and installs whatever is missing. Change the list with `"default_packages"` in
+`~/.bcagent/config.json`.
+
+**Plain-language actions.** Requests like *"commit and push"*, *"run the tests"*, *"save it to
+colab"*, *"open a pull request"*, *"undo the last commit"* or *"set up an ssh key"* are recognized
+directly, even with the tiny default model. bcagent asks before it runs them. Mixed requests such as
+*"fix the bug in calc.py and commit"* go to the agent first, then bcagent offers the action. Questions
+like *"how do I push?"* always go to the agent.
+
+**Safety for big files.** Small models see only part of a long file. If the agent tries to rewrite a
+file it only saw part of, which would delete the rest, bcagent refuses the edit and suggests what to
+do instead. The same happens when it rewrites a file it never saw into something much shorter.
+Search-and-replace edits on long files still work.
+
+**Jupyter notebooks.** `.ipynb` files in the project are shown to the agent as Python with `# %%`
+cells and saved back as real notebooks. Outputs of unchanged cells are kept, and `/undo` restores the
+exact original file. bcagent warns when an edit removes code cells.
+
+### For students and instructors
+
+| Command | What it does |
+|---------|--------------|
+| `/learn` (or `bcagent --learn`) | **Learning mode:** explanations, hints and guiding questions instead of finished code; no file edits. Instructors can turn it on for everyone with `"learn_mode": true` in the config or `BCAGENT_LEARN=1`. |
+| `/review [@file …]` | Instructor-style feedback (what works, bugs, style, tests, next step) without rewriting the code. With no file named, it reviews your uncommitted Python files. |
+| `/test` | Runs `pytest`. On failures it offers to let the agent fix **your code**, never the tests, and runs the tests again (up to 3 rounds). It installs pytest if needed, and offers to write tests if there are none. |
+| `/export [file.md]` | Saves a readable log of the session: prompts, answers, applied edits with diffs, commands and their results. Students can hand it in with an assignment to show how they used the AI. |
+| `/resume`, `bcagent -c` | Continue an earlier conversation in this folder. The last 10 are kept. |
+
+**Reporting bugs.** If something goes wrong inside bcagent, it keeps running and asks whether you want
+to report the problem. You see the complete report first. Your home folder is replaced with `~`,
+tokens, keys and email addresses are removed, and your prompt is included only if you say yes. With a
+GitHub sign-in it files the issue from your account, and adds a comment instead if the same bug is
+already reported. Without a sign-in it opens a pre-filled *New issue* page in your browser. Report a
+problem yourself with `/bug what happened`. Choose *"don't ask again"* to turn the question off
+(`"bug_reports": false`).
 
 ### Inside the session
 
@@ -143,8 +196,11 @@ Each request goes through these steps:
 | `/github create`, `/github pr`, `/github login` | GitHub repositories and pull requests |
 | `/colab <url>`, `/colab pull\|push\|open\|list\|unlink\|login\|logout` | edit a Google Colab notebook (see below) |
 | `/run [file.py] [args]` | run a Python file (default: the last one bcagent wrote) |
+| `/test`, `/review`, `/learn`, `/export`, `/resume` | tests, feedback, learning mode, session log, earlier conversations (see above) |
+| `/packages` | check / install the default libraries |
+| `/bug [what happened]` | report a problem with bcagent on GitHub |
 | `/undo` | undo the last edits |
-| `/update` | check for a new bcagent version, install it and restart |
+| `/update [--to <version> \| --list]` | update (or roll back) bcagent and restart |
 | `/clear`, `/status`, `/doctor`, `/exit` | |
 
 ## Agents
@@ -309,6 +365,8 @@ bcagent/
 ├── install.sh / install.ps1 / install.bat    installers (macOS+Linux / Windows)
 ├── uninstall.sh / uninstall.bat
 ├── pyproject.toml
+├── tests/                                    pytest suite (run in CI on macOS, Linux and Windows)
+├── .github/workflows/                        ci.yml (tests) · release.yml (tag vX.Y.Z → tested release)
 └── bcagent/
     ├── cli.py        argument parsing, REPL, slash commands, `agents`, `mcp` and `doctor` subcommands
     ├── session.py    the agent loop: prompt → model → edits → approval → check → repair
@@ -318,14 +376,30 @@ bcagent/
     ├── mcp.py        MCP client, public server catalog, ~/.bcagent/mcp.json
     ├── git.py        /git and /github: git commands, GitHub sign-in, repos and pull requests
     ├── colab.py      Google Colab: guided Google sign-in, Drive API, notebook ↔ `# %%` file sync
+    ├── actions.py    plain-language requests → built-in actions (commit, push, tests, colab…)
+    ├── packages.py   default libraries for your code (numpy, pandas, scikit-learn, statsmodels, statsformula)
+    ├── report.py     bug reports to GitHub issues (scrubbed, previewed, from your account)
     ├── llm.py        Ollama client (Python standard library only, streaming)
     ├── ui.py         Bellevue College Blue theme, Bulldog banner, diffs, menus
-    ├── update.py     self-update: checks GitHub for new versions and upgrades in place
+    ├── update.py     self-update from GitHub releases, rollback (`--to`), version pinning
     └── config.py     ~/.bcagent/config.json
 ```
 
 Configuration lives in `~/.bcagent/config.json`: `num_ctx`, `max_tokens`, `max_repairs`, `ollama_host`,
-and the default `agent`. Set `BCAGENT_HOME` to move it.
+the default `agent`, `default_packages`, `learn_mode`, `bug_reports`, `auto_update` and
+`pinned_version`. Set `BCAGENT_HOME` to move it.
+
+## Development
+
+```bash
+python -m venv .venv && .venv/bin/pip install -e . pytest
+.venv/bin/python -m pytest -q tests          # fast, offline; never touches your real accounts or ~/.ssh
+```
+
+**Releasing:** bump the version in `bcagent/__init__.py` and `pyproject.toml`, commit, then
+`git tag v1.6.0 && git push origin main v1.6.0`. The `release` workflow runs the tests on all three
+operating systems, checks that the tag matches the version, and publishes the GitHub release. Users
+update only after that.
 
 ## Requirements
 

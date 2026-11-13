@@ -2,7 +2,10 @@
 from __future__ import annotations
 
 import ast
+import hashlib
 import json
+import time
+from datetime import datetime
 import os
 import random
 import re
@@ -18,14 +21,34 @@ from rich.markdown import Markdown
 from rich.markup import escape
 from rich.text import Text
 
-from . import ui
+from . import packages as packages_mod, ui
 from .agents import Agent
+from .config import HOME
 from .colab import ColabError, ColabSync, check_source
-from .edits import Edit, check_python, parse_response, valid_path, write_edit
+from .edits import Edit, check_python, parse_response, raw_text, valid_path, write_edit
 from .llm import Ollama
 from .mcp import MCPError, MCPManager, parse_tool_calls
 from .project import Project
 from .ui import console
+
+LEARN_RULES = """LEARNING MODE: the user is a student learning to program. Help them learn instead of doing the work.
+- Do NOT write the complete solution, whole functions or whole files, and never use `FILE:` lines.
+- Explain the idea in plain words, point to where the problem is (file and line), and give the next step as a hint.
+- Ask one guiding question the student can answer to make progress.
+- Code examples must be tiny (at most 5 lines) and show a concept, not the answer to their task.
+- Be encouraging. If they ask for the full answer, give a bigger hint and suggest how to check their own solution."""
+
+REVIEW_PROMPT = """Review this code like a friendly computer science instructor reviewing a student's work.
+Do not rewrite the files. Use these sections:
+1. What works well (1-3 points)
+2. Bugs or problems (file and line, why it is wrong, how to fix it in words)
+3. Style and readability (PEP 8, names, comments, docstrings)
+4. Testing: which cases to test
+5. One concrete next step
+Files to review: {files}"""
+
+SESSIONS_DIR = HOME / "sessions"
+PYTEST_SUMMARY = re.compile(r"\b\d+ (?:passed|failed|errors?|skipped|xfailed|deselected)\b|no tests ran")
 
 VERBS = ["Fetching", "Sniffing out bugs", "Bulldogging", "Chewing on it", "Wagging", "Digging",
          "Pawing through code", "Thinking", "Herding bytes", "Barking at the compiler"]
@@ -47,6 +70,21 @@ class Session:
         self.trusted_tools: set = set()  # MCP tools the user allowed for the whole session
         self.last_python: Optional[str] = None  # last .py file bcagent created or changed (for /run)
         self.colab = ColabSync(project.root)    # Colab notebooks linked with /colab
+        self.learn = bool(cfg.get("learn_mode")) or bool(os.environ.get("BCAGENT_LEARN"))  # hints, no edits
+        self.no_edits = False                   # one turn without edits (/review)
+        self.last_error = None                  # (exception, input) of the last internal error, for /bug
+        self.protect_tests = False              # while fixing failing tests: don't let the model edit tests
+        self.events: List[dict] = []            # session log for /export
+        self.started = datetime.now()
+        self.session_id = self.started.strftime("%Y%m%d-%H%M%S")
+
+    # -- modes ----------------------------------------------------------------
+    @property
+    def edit_format(self) -> str:
+        return "none" if (self.learn or self.no_edits) else self.agent.edit_format
+
+    def log(self, kind: str, text: str, **extra) -> None:
+        self.events.append({"time": datetime.now().strftime("%H:%M:%S"), "kind": kind, "text": text, **extra})
 
     def start_mcp(self) -> None:
         """Connect to the configured MCP servers (first turn only)."""
@@ -87,22 +125,39 @@ class Session:
             notes = "\n\n".join(self.notes) + "\n\n"
             self.notes.clear()
         hint = ""
-        if self.agent.edit_format != "none":
+        if self.edit_format != "none":
             targets = [f for f in dict.fromkeys(self.project.mentioned(prompt) + self.project.named(prompt))]
             if targets:
                 hint = ("\n\nChange the existing file(s) " + ", ".join(targets) +
                         " (shown above). Do not create other files unless the task asks for it.")
-            notebooks = [f for f in dict.fromkeys(targets + self.project.pinned) if self.colab.is_mirror(f)]
+            notebooks = [f for f in dict.fromkeys(targets + self.project.pinned)
+                         if self.colab.is_mirror(f) or f.lower().endswith(".ipynb")]
             if notebooks:
-                hint += ("\n" + ", ".join(notebooks) + " is a Google Colab notebook. Each cell starts with a "
+                kind = "Google Colab" if self.colab.is_mirror(notebooks[0]) else "Jupyter"
+                hint += ("\n" + ", ".join(notebooks) + f" is a {kind} notebook. Each cell starts with a "
                          "`# %%` line; text cells start with `# %% [markdown]` and every line is commented "
                          "with `# `. Keep the cell lines, add new cells with `# %%`, and use `!pip install` "
                          "for packages. Change the notebook by writing the whole file as `FILE: " + notebooks[0] +
-                         "`. bcagent uploads it to Colab after the user approves.")
-            if self.agent.edit_format == "whole":
+                         "`." + (" bcagent uploads it to Colab after the user approves." if kind != "Jupyter" else ""))
+            big = [f for f in targets + self.project.pinned if f in self.project.truncated]
+            if big and self.edit_format == "whole":
+                hint += ("\nIMPORTANT: " + ", ".join(dict.fromkeys(big)) + " is too long and was only partly "
+                         "shown. Do not rewrite it with FILE:. Explain the change and show only the lines "
+                         "to change.")
+            elif self.edit_format == "whole":
                 hint += "\nAnswer with `FILE: <path>` followed by the COMPLETE updated file in a code block."
         user = f"{ctx}\n\n{notes}Task: {prompt}{hint}"
-        system = self.agent.system_prompt()
+        if self.learn or self.no_edits:
+            system = Agent(self.agent.name, self.agent.model, edit_format="none",
+                           instructions=self.agent.instructions).system_prompt()
+            if self.learn:
+                system += "\n\n" + LEARN_RULES
+        else:
+            system = self.agent.system_prompt()
+        libs = packages_mod.wanted(self.cfg)
+        if libs:
+            system += "\n\n" + packages_mod.PROMPT_NOTE.format(
+                libs=", ".join("scikit-learn (import sklearn)" if l == "scikit-learn" else l for l in libs))
         tools = self.mcp.prompt_section()
         if tools:
             system += "\n\n" + tools
@@ -156,6 +211,9 @@ class Session:
         self.start_mcp()
         text, interrupted = self.generate(self.build_messages(prompt))
         self.history += [{"role": "user", "content": prompt}, {"role": "assistant", "content": text}]
+        self.log("prompt" if not (repair or tool_rounds) else "follow-up", prompt)
+        self.log("answer", text, model=self.agent.model)
+        self.save()
         if interrupted:
             console.print("  [warn]⎿  Interrupted by user[/]")
             return
@@ -165,7 +223,7 @@ class Session:
             if results:
                 return self.turn("Tool results:\n" + "\n\n".join(results) +
                                  "\n\nContinue the original task using these results.", repair, tool_rounds + 1)
-        if self.agent.edit_format == "none":
+        if self.edit_format == "none":
             return
         edits, commands, orphans = parse_response(text, self.project)
         if not edits and orphans:
@@ -174,10 +232,11 @@ class Session:
                 return self.turn(chat)
             if e:
                 edits = [e]
+        blocked = self.guard(edits)
         applied, feedback = self.review(edits)
         if feedback:
             return self.turn(feedback)
-        problems = [f"- {e.path}: {e.error}" for e in edits if e.error]
+        problems = [f"- {e.path}: {e.error}" for e in edits if e.error and not e.blocked]
         broken = set()
         for path in applied:
             err = self.check(path)
@@ -185,6 +244,7 @@ class Session:
                 problems.append(f"- {path}: {err}")
                 broken.add(path)
         self.sync_colab([p for p in applied if p not in broken])
+        self.report_blocked(blocked)
         if problems:
             for p in problems:
                 console.print(f"  [err]✗[/] {p[2:]}")
@@ -195,6 +255,48 @@ class Session:
                        "\nFix them. Write the COMPLETE corrected file(s) using `FILE: path` and a code block.")
                 return self.turn(fix, repair + 1)
         self.offer_commands(commands + self.run_suggestions(applied, commands, problems))
+
+    # -- safety: never let a whole-file rewrite delete code the model didn't see ---------
+    def guard(self, edits: List[Edit]) -> List[Edit]:
+        blocked = []
+        for e in edits:
+            if self.protect_tests and is_test_file(e.path) and not e.error:
+                e.error, e.blocked = ("it is a test file – while fixing failing tests bcagent changes your code, "
+                                      "not the tests (edit the test yourself if it is wrong)"), True
+                blocked.append(e)
+                continue
+            if e.error or e.is_new or not e.whole:
+                continue
+            if e.path.lower().endswith(".ipynb") or self.colab.is_mirror(e.path):
+                from .colab import text_to_cells
+                before = sum(1 for k, _ in text_to_cells(e.old or "") if k == "code")
+                after = sum(1 for k, _ in text_to_cells(e.new) if k == "code")
+                if after < before:
+                    e.warning = f"the model removed {before - after} code cell(s) – check the diff"
+            old_lines = len((e.old or "").splitlines())
+            new_lines = len(e.new.splitlines())
+            reason = None
+            if e.path in self.project.truncated:
+                shown, total = self.project.truncated[e.path]
+                reason = (f"the file is too long for {self.agent.model}'s context: the model saw only "
+                          f"the first {shown} of {total} lines, so rewriting it would delete the rest")
+            elif e.path not in self.project.seen and old_lines >= 20 and new_lines < old_lines * 0.5:
+                reason = (f"the model never saw this file but its version has {new_lines} lines instead of "
+                          f"{old_lines}, so it would delete code")
+            if reason:
+                e.error, e.blocked = reason, True
+                blocked.append(e)
+        return blocked
+
+    def report_blocked(self, blocked: List[Edit]) -> None:
+        for e in blocked:
+            console.print(f"  [warn]⚠ Not applied to {escape(e.path)}:[/] {escape(e.error)}.")
+            self.log("blocked", f"{e.path}: {e.error}")
+        if any("too long" in (e.error or "") or "never saw" in (e.error or "") for e in blocked):
+            console.print("  [muted]⎿  Options: ask about one function or section (e.g. \"fix the load_data "
+                          "function in @file.py\"), use an agent that makes small edits ([/][bc]/install "
+                          "bulldog-3b[/][muted]), or give the model more context: raise [/][bc]num_ctx[/][muted] in "
+                          "~/.bcagent/config.json.[/]")
 
     def check(self, path: str) -> Optional[str]:
         if self.colab.is_mirror(path):  # notebook cells may use !pip / %magic lines
@@ -292,7 +394,7 @@ class Session:
         if not path:
             return None, None
         old = self.project.read(path) if self.project.exists(path) else None
-        return Edit(path, new=block.body.rstrip("\n") + "\n", old=old), None
+        return Edit(path, new=block.body.rstrip("\n") + "\n", old=old, whole=True), None
 
     def review(self, edits: List[Edit]) -> Tuple[List[str], Optional[str]]:
         applied: List[str] = []
@@ -319,9 +421,13 @@ class Session:
                 elif c == 2:
                     console.print(f"  [muted]⎿  Skipped {e.path}[/]")
                     continue
+            before = raw_text(self.project, e.path)
             write_edit(self.project, e)
-            batch.append((e.path, e.old))
+            batch.append((e.path, before))
             applied.append(e.path)
+            self.project.seen.add(e.path)
+            self.log("edit", f"{'Created' if e.is_new else 'Updated'} {e.path} (+{e.stats()[0]} -{e.stats()[1]})",
+                     diff="\n".join(e.diff_lines()[:200]))
             if e.path.endswith(".py"):
                 self.last_python = e.path
             a, r = e.stats()
@@ -368,10 +474,19 @@ class Session:
         Returns None normally, True if a follow-up turn was started."""
         code, out = run_command(cmd, str(self.project.root))
         self.notes.append(f"I ran `{cmd}` (exit code {code}). Output:\n```\n{out[-2500:]}\n```")
+        self.log("command", cmd, code=code, output=out[-1500:])
         if code == 0:
             console.print("  [ok]⎿  done[/]")
             return None
         console.print(f"  [err]⎿  exit code {code}[/]")
+        m = re.search(r"No module named '([\w.]+)'", out)
+        if m and (self.auto or (ui.is_interactive() and not self.print_mode)):
+            pkg = packages_mod.pip_name_for(m.group(1))
+            if self.auto or ui.choose(f"The module [bold]{escape(m.group(1))}[/] is not installed. Install "
+                                      f"[bc]{escape(pkg)}[/] with pip and run again?", ["Yes", "No"]) == 0:
+                if run_command(f"python -m pip install {pkg}", str(self.project.root))[0] == 0:
+                    self.notes.pop()
+                    return self.execute(cmd)
         if self.print_mode or not ui.is_interactive():
             return None
         c, msg = ui.ask("Ask bcagent to fix this error?", ["Yes", "No"])
@@ -388,8 +503,8 @@ class Session:
             return []
         out = []
         for path in applied:
-            if self.colab.is_mirror(path):
-                continue  # notebooks run in Colab, not here
+            if self.colab.is_mirror(path) or path.lower().endswith(".ipynb"):
+                continue  # notebooks run in Colab / Jupyter, not here
             if any(path in c or Path(path).name in c for c in commands):
                 continue
             if is_runnable_script(self.project.resolve(path)):
@@ -408,6 +523,194 @@ class Session:
             return
         cmd = python_command(target, parts[1:]) if target.endswith(".py") else " ".join([target] + parts[1:])
         self.execute(cmd)
+
+    # -- /test -----------------------------------------------------------------
+    def run_tests(self, arg: str = "", rounds: int = 3) -> bool:
+        """Run pytest; on failures offer to let the agent fix the code, then run the tests again."""
+        cmd = "python -m pytest -q" + (f" {arg}" if arg else "")
+        extra: dict = {}
+        for attempt in range(rounds + 2):
+            code, out = run_command(cmd, str(self.project.root), extra)
+            self.log("command", cmd, code=code, output=out[-1500:])
+            if code not in (0, 5) and not PYTEST_SUMMARY.search(out) and "No module named pytest" not in out:
+                # pytest itself didn't start (broken plugin, bad conftest...) – not a bug in the user's code
+                if not extra:
+                    console.print("  [warn]⎿  pytest failed to start – trying again without installed pytest "
+                                  "plugins[/]")
+                    extra = {"PYTEST_DISABLE_PLUGIN_AUTOLOAD": "1"}
+                    continue
+                console.print("  [err]⎿  pytest could not start, so the tests didn't run.[/] [muted]This is a "
+                              "problem with the Python environment, not your code. Create a project "
+                              "environment ([/][bc]python -m venv .venv[/][muted] then [/][bc]pip install pytest[/]"
+                              "[muted]) – bcagent uses .venv automatically.[/]")
+                return False
+            if code == 0:
+                console.print("  [ok]⎿  all tests passed[/]")
+                return True
+            interactive = ui.is_interactive() and not self.print_mode
+            if "No module named pytest" in out:
+                if interactive and ui.choose("pytest is not installed. Install it?", ["Yes", "No"]) != 0:
+                    return False
+                if not interactive and not self.auto:
+                    return False
+                run_command("python -m pip install pytest", str(self.project.root))
+                continue
+            if code == 5:  # no tests collected
+                console.print("  [warn]⎿  no tests found[/]")
+                if interactive and ui.choose("Ask bcagent to write tests?", ["Yes", "No"]) == 0:
+                    self.turn("Write pytest unit tests for the code in this project. Put them in "
+                              "tests/test_<module>.py and cover normal cases, edge cases and errors.")
+                    continue
+                return False
+            console.print(f"  [err]⎿  tests failed (exit code {code})[/]")
+            if attempt == rounds or self.edit_format == "none":
+                return False
+            if interactive:
+                c, msg = ui.ask("Ask bcagent to fix the failing tests?", ["Yes", "No"])
+                if c == 1:
+                    return False
+                note = f"\n{msg}" if c == ui.CHAT else ""
+            elif self.auto:
+                note = ""
+            else:
+                return False
+            targets = self.tested_modules(out)
+            where = (" ".join("@" + t for t in targets) + " so that the tests pass") if targets else \
+                "the code so that the tests pass"
+            self.protect_tests = True
+            try:
+                self.turn(f"The tests fail. Fix {where}. Do NOT change the test files. "
+                          f"pytest output:\n```\n{out[-3500:]}\n```{note}")
+            finally:
+                self.protect_tests = False
+        return False
+
+    def tested_modules(self, output: str) -> List[str]:
+        """Project modules imported by the failing test files (the files to fix)."""
+        tests = dict.fromkeys(re.findall(r"([\w./-]*test[\w./-]*\.py)", output))
+        found: List[str] = []
+        for t in tests:
+            if not self.project.exists(t):
+                continue
+            for mod in re.findall(r"^\s*(?:from|import)\s+([\w.]+)", self.project.read(t), re.M):
+                rel = mod.replace(".", "/") + ".py"
+                for cand in (rel, "src/" + rel):
+                    if self.project.exists(cand) and not is_test_file(cand) and cand not in found:
+                        found.append(cand)
+        return found[:4]
+
+    # -- /review ---------------------------------------------------------------
+    def review_code(self, arg: str = "") -> None:
+        files = [f.lstrip("@") for f in arg.split()]
+        if not files:
+            files = self.changed_files() or ([self.last_python] if self.last_python else []) or self.project.pinned
+        files = [f for f in files if self.project.exists(f) or (self.project.root / f).is_dir()]
+        if not files:
+            console.print("[muted]Nothing to review – name a file: [/][bc]/review @calc.py[/]")
+            return
+        console.print("[muted]Reviewing " + ", ".join(files) + "…[/]")
+        self.no_edits = True
+        try:
+            self.turn(REVIEW_PROMPT.format(files=" ".join("@" + f for f in files)))
+        finally:
+            self.no_edits = False
+
+    def changed_files(self) -> List[str]:
+        """Uncommitted Python/notebook files according to git (empty if not a git repo)."""
+        try:
+            r = subprocess.run(["git", "status", "--porcelain", "-uall"], cwd=self.project.root,
+                               capture_output=True, text=True, timeout=10)
+        except (OSError, subprocess.SubprocessError):
+            return []
+        if r.returncode != 0:
+            return []
+        out = [l[3:].strip('"') for l in r.stdout.splitlines() if l.strip()]
+        return [f for f in out if f.endswith((".py", ".ipynb")) and self.project.exists(f)][:6]
+
+    # -- /export: a readable log of the session (for instructors) ----------------
+    def export(self, arg: str = "") -> Path:
+        from . import __version__
+        name = arg.strip() or f"bcagent-session-{self.session_id}.md"
+        if not name.endswith(".md"):
+            name += ".md"
+        path = self.project.resolve(name)
+        prompts = sum(1 for e in self.events if e["kind"] == "prompt")
+        edits = sum(1 for e in self.events if e["kind"] == "edit")
+        lines = [f"# bcagent session log",
+                 "",
+                 f"- Date: {self.started.strftime('%Y-%m-%d %H:%M')} – {datetime.now().strftime('%H:%M')}",
+                 f"- Project: {self.project.root.name}",
+                 f"- bcagent v{__version__} · agent {self.agent.name} · model {self.agent.model} (local)",
+                 f"- Learning mode: {'on' if self.learn else 'off'}",
+                 f"- {prompts} prompt(s), {edits} file edit(s) applied",
+                 ""]
+        for e in self.events:
+            t, kind, text = e["time"], e["kind"], e["text"]
+            if kind in ("prompt", "follow-up"):
+                lines += [f"## {t} · {'You' if kind == 'prompt' else 'bcagent follow-up'}", "", text.strip(), ""]
+            elif kind == "answer":
+                lines += [f"**bcagent** ({e.get('model', '')}):", "", text.strip() or "_(no answer)_", ""]
+            elif kind == "edit":
+                lines += [f"**Edit applied:** {text}", ""]
+                if e.get("diff"):
+                    lines += ["```diff", e["diff"], "```", ""]
+            elif kind == "command":
+                lines += [f"**Ran** `{text}` → exit code {e.get('code')}", ""]
+                if e.get("output"):
+                    lines += ["```", e["output"].strip()[-1200:], "```", ""]
+            else:
+                lines += [f"**{kind}:** {text}", ""]
+        path.write_text("\n".join(lines), encoding="utf-8")
+        return path
+
+    # -- saved sessions (/resume, bcagent -c) -------------------------------------
+    def _project_key(self) -> str:
+        return hashlib.sha1(str(self.project.root).encode()).hexdigest()[:12]
+
+    def save(self) -> None:
+        if not self.history:
+            return
+        first = next((e["text"] for e in self.events if e["kind"] == "prompt"), "")
+        data = {"root": str(self.project.root), "agent": self.agent.name, "model": self.agent.model,
+                "history": self.history[-40:], "pinned": self.project.pinned, "events": self.events[-300:],
+                "learn": self.learn, "title": first[:80], "saved": time.time(), "id": self.session_id}
+        d = SESSIONS_DIR / self._project_key()
+        try:
+            d.mkdir(parents=True, exist_ok=True)
+            (d / f"{self.session_id}.json").write_text(json.dumps(data), encoding="utf-8")
+            for old in sorted(d.glob("*.json"))[:-10]:  # keep the 10 most recent per project
+                old.unlink()
+        except OSError:
+            pass
+
+    def saved_sessions(self) -> List[dict]:
+        d = SESSIONS_DIR / self._project_key()
+        out = []
+        for f in sorted(d.glob("*.json"), reverse=True) if d.is_dir() else []:
+            try:
+                data = json.loads(f.read_text(encoding="utf-8"))
+            except (OSError, ValueError):
+                continue
+            if data.get("id") != self.session_id:
+                out.append(data)
+        return out
+
+    def restore(self, data: dict) -> None:
+        self.history = data.get("history", [])
+        self.events = data.get("events", []) + self.events
+        self.project.pinned = [p for p in data.get("pinned", []) if self.project.exists(p)]
+        self.learn = data.get("learn", self.learn)
+        self.session_id = data.get("id", self.session_id)
+        last = next((m["content"] for m in reversed(self.history) if m["role"] == "user"), "")
+        console.print(f"[ok]✓[/] resumed the session from "
+                      f"{datetime.fromtimestamp(data.get('saved', 0)).strftime('%b %d %H:%M')} "
+                      f"({len(self.history) // 2} exchange(s)). Last request: [bc]{escape(last[:100])}[/]")
+
+
+def is_test_file(path: str) -> bool:
+    name = Path(path).name
+    return name.startswith("test_") or name.endswith("_test.py") or name == "conftest.py" or \
+        "tests/" in path.replace("\\", "/")
 
 
 def is_runnable_script(path: Path) -> bool:
@@ -504,10 +807,10 @@ def _fix_command(cmd: str, cwd: str = ".") -> str:
     return cmd
 
 
-def run_command(cmd: str, cwd: str) -> Tuple[int, str]:
+def run_command(cmd: str, cwd: str, extra_env: Optional[dict] = None) -> Tuple[int, str]:
     console.print(f"[bc]$[/] {escape(cmd)}", highlight=False)
     cmd = _fix_command(cmd, cwd)
-    env = dict(os.environ, PYTHONUNBUFFERED="1")
+    env = dict(os.environ, PYTHONUNBUFFERED="1", **(extra_env or {}))
     if re.match(r"\s*(git|gh)\b", cmd) or "&& git " in cmd:
         from .git import auth_env
         env = auth_env(env)  # GitHub token for push / pull / clone, never shown in the command
