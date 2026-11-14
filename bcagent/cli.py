@@ -12,7 +12,7 @@ from rich.markup import escape
 from rich.progress import BarColumn, DownloadColumn, Progress, TextColumn, TransferSpeedColumn
 from rich.table import Table
 
-from . import __version__, actions as actions_mod, agents as agents_mod, course as course_mod, hardware as hardware_mod, colab as colab_mod, git as git_mod, packages as packages_mod, report as report_mod, mcp as mcp_mod, ui, update as update_mod
+from . import __version__, actions as actions_mod, helptext, agents as agents_mod, course as course_mod, hardware as hardware_mod, colab as colab_mod, git as git_mod, packages as packages_mod, report as report_mod, mcp as mcp_mod, ui, update as update_mod
 from .agents import CATALOG, Agent, all_agents
 from .config import AGENTS_DIR, CONFIG_FILE, HISTORY_FILE, load_config, save_config
 from .llm import Ollama, OllamaError
@@ -545,6 +545,12 @@ def make_prompt(session: Session):
     class BCCompleter(Completer):
         def get_completions(self, document, complete_event):
             text = document.text_before_cursor
+            if text.startswith("/help "):
+                frag = text[6:]
+                for topic in helptext.TOPICS:
+                    if topic.startswith(frag):
+                        yield Completion(topic, start_position=-len(frag), display_meta=helptext.TOPICS[topic][0])
+                return
             if text.startswith("/") and " " not in text:
                 for name, desc in COMMANDS:
                     if name.startswith(text):
@@ -605,11 +611,7 @@ def handle_slash(line: str, session: Session, client: Ollama, cfg: dict) -> bool
     if cmd in ("/exit", "/quit", "/q"):
         return False
     if cmd in ("/help", "/?"):
-        console.print(HELP)
-        t = Table.grid(padding=(0, 2))
-        for name, desc in COMMANDS:
-            t.add_row(f"[bc]{name}[/]", desc)
-        console.print(t)
+        helptext.show(arg)
     elif cmd == "/clear":
         session.history.clear()
         session.events.clear()
@@ -892,7 +894,7 @@ def repl(session: Session, client: Ollama, cfg: dict, first: Optional[str]) -> N
             break
         try:
             if line == "?":
-                console.print(HELP)
+                helptext.show()
             elif line.startswith("/"):
                 if not handle_slash(line, session, client, cfg):
                     break
@@ -946,6 +948,15 @@ def main(argv: Optional[List[str]] = None) -> None:
     if argv and argv[0] == "doctor":
         doctor(client, cfg)
         return
+    if argv and argv[0] == "help":
+        helptext.show(" ".join(argv[1:]))
+        return
+    if argv and argv[0] == "bench":
+        from . import bench as bench_mod
+        sys.exit(bench_mod.command(argv[1:]))
+    if argv and argv[0] == "logs":
+        from . import logs as logs_mod
+        sys.exit(logs_mod.command(argv[1:]))
     if argv and argv[0] == "course":
         sys.exit(course_command(argv[1:]))
     if argv and argv[0] == "packages":
@@ -961,10 +972,7 @@ def main(argv: Optional[List[str]] = None) -> None:
         prog="bcagent",
         description="bcagent – Bellevue College Agent: a local AI coding CLI (like Claude Code) "
                     "powered by the smallest, fastest local code LLM.",
-        epilog="Other commands: `bcagent agents [list|catalog|install|remove|use|create]`, "
-               "`bcagent mcp [list|catalog|add|remove|tools]`, `bcagent colab [login|logout|list|link|pull|push]`, "
-               "`bcagent github [login|status|create|pr]`, `bcagent git <command>`, "
-               "`bcagent doctor`, `bcagent packages`, `bcagent update [--to X.Y.Z | --list]`, `bcagent bug`")
+        epilog=helptext.EPILOG, formatter_class=argparse.RawDescriptionHelpFormatter)
     p.add_argument("prompt", nargs="*", help="initial prompt")
     p.add_argument("-p", "--print", action="store_true", dest="print_mode",
                    help="non-interactive: answer the prompt, print the result and exit")

@@ -121,11 +121,26 @@ class Ollama:
         with self._open("/api/delete", {"name": name, "model": name}, method="DELETE"):
             pass
 
+    def capabilities(self, model: str) -> list:
+        """What the model supports ("completion", "tools", "thinking", ...), from /api/show (cached)."""
+        cache = self.__dict__.setdefault("_caps", {})
+        if model not in cache:
+            try:
+                with self._open("/api/show", {"model": model}, timeout=10) as r:
+                    cache[model] = json.load(r).get("capabilities") or []
+            except (OllamaError, ValueError):
+                cache[model] = []
+        return cache[model]
+
     # -- chat -----------------------------------------------------------------
     def chat_stream(self, model: str, messages: list, options: Optional[dict] = None) -> Iterator[str]:
         """Yield response tokens. Final timing stats land in self.last_stats."""
         payload = {"model": model, "messages": messages, "stream": True,
                    "options": options or {}, "keep_alive": "30m"}
+        if "thinking" in self.capabilities(model):
+            # "thinking" models (qwen3, qwen3.5, ...) would first reason for a long time: far too slow
+            # on a laptop, and bcagent's prompts already say step by step what to do
+            payload["think"] = False
         self.last_stats = {}
         resp = self._open("/api/chat", payload)
         try:

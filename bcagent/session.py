@@ -105,7 +105,9 @@ class Session:
             return None
 
     def log(self, kind: str, text: str, **extra) -> None:
-        self.events.append({"time": datetime.now().strftime("%H:%M:%S"), "kind": kind, "text": text, **extra})
+        now = datetime.now()
+        self.events.append({"time": now.strftime("%H:%M:%S"), "date": now.strftime("%Y-%m-%d"), "kind": kind,
+                            "text": text, **extra})
 
     def start_mcp(self) -> None:
         """Connect to the configured MCP servers (first turn only)."""
@@ -200,8 +202,11 @@ class Session:
                [{"role": "user", "content": user}]
 
     def options(self) -> dict:
-        return {"temperature": self.agent.temperature, "num_ctx": int(self.cfg.get("num_ctx", 8192)),
+        opts = {"temperature": self.agent.temperature, "num_ctx": int(self.cfg.get("num_ctx", 8192)),
                 "num_predict": int(self.cfg.get("max_tokens", 4096))}
+        if self.cfg.get("seed") is not None:
+            opts["seed"] = int(self.cfg["seed"])   # repeatable answers (bcagent bench)
+        return opts
 
     # -- generation -----------------------------------------------------------
     def generate(self, messages: List[dict]) -> Tuple[str, bool]:
@@ -276,11 +281,12 @@ class Session:
                 return self.turn(chat)
             if e:
                 edits = [e]
-        self.splice_sections(edits)
+        self.splice_sections(edits, prompt)
         blocked = self.guard(edits)
         applied, feedback = self.review(edits)
         if feedback:
             return self.turn(feedback)
+        self.fix_imports(applied)
         problems = [f"- {e.path}: {e.error}" for e in edits if e.error and not e.blocked]
         broken = set()
         for path in applied:
@@ -301,12 +307,42 @@ class Session:
                 return self.turn(fix, repair + 1)
         self.offer_commands(commands + self.run_suggestions(applied, commands, problems))
 
-    def splice_sections(self, edits: List[Edit]) -> None:
-        """Big files shown as single functions: put the model's functions back into the full file."""
-        from .sections import splice
-        for e in edits:
-            if e.error or e.is_new or not e.whole or e.path not in self.project.sections:
+    def fix_imports(self, paths: List[str]) -> None:
+        """Add imports the model forgot (json, datetime, pd, np, ...) to the Python files it wrote."""
+        from .imports import add_missing_imports
+        for path in paths:
+            if not path.endswith(".py"):
                 continue
+            try:
+                p = self.project.resolve(path)
+                new, added = add_missing_imports(p.read_text(encoding="utf-8"))
+            except (OSError, ValueError):
+                continue
+            if added:
+                p.write_text(new, encoding="utf-8")
+                out = console if not self.print_mode else ui.err_console
+                out.print(f"  [ok]⎿[/]  added the missing import{'s' if len(added) > 1 else ''} to "
+                          f"[bc]{escape(path)}[/]: {escape(', '.join(added))}")
+                self.log("edit", f"{path}: added {', '.join(added)}")
+
+    def splice_sections(self, edits: List[Edit], prompt: str = "") -> None:
+        """Put the model's functions back into the full file when it answered with only part of it:
+        big files shown as single functions, and "lazy" answers that rewrite a file as just the
+        function that changed (small models do that a lot)."""
+        from .sections import find_defs, splice
+        removing = re.search(r"\b(remove|delete|drop|get rid of|only keep|keep only|rewrite (the )?(whole|entire))\b",
+                             prompt, re.I)
+        for e in edits:
+            if e.error or e.is_new or not e.whole or not e.path.endswith(".py"):
+                continue
+            if e.path not in self.project.sections:
+                old_top = {d.name for d in find_defs(e.old or "") if d.top}
+                new_top = {d.name for d in find_defs(e.new) if d.top}
+                lazy = (len(old_top) >= 3 and new_top and new_top <= old_top | new_top and
+                        len(old_top - new_top) >= max(2, len(old_top) // 2) and
+                        len(e.new.splitlines()) < len((e.old or "").splitlines()) * 0.5)
+                if not lazy or removing:
+                    continue
             new, replaced, added, err = splice(e.old or "", e.new)
             if err:
                 e.error, e.blocked = (f"bcagent couldn't put the change into the long file ({err})"), True
@@ -708,8 +744,11 @@ class Session:
                  if self.course else "- Course profile: none",
                  f"- {prompts} prompt(s), {edits} file edit(s) applied",
                  ""]
+        day = self.started.strftime("%Y-%m-%d")
         for e in self.events:
             t, kind, text = e["time"], e["kind"], e["text"]
+            if e.get("date") and e["date"] != day:
+                t = f"{e['date']} {t}"   # a resumed session continues on another day
             if kind in ("prompt", "follow-up"):
                 lines += [f"## {t} · {'You' if kind == 'prompt' else 'bcagent follow-up'}", "", text.strip(), ""]
             elif kind == "answer":
@@ -724,7 +763,10 @@ class Session:
                     lines += ["```", e["output"].strip()[-1200:], "```", ""]
             else:
                 lines += [f"**{kind}:** {text}", ""]
-        path.write_text("\n".join(lines), encoding="utf-8")
+        body = "\n".join(lines)
+        # lets `bcagent logs check` notice logs that were edited by hand
+        body += f"\n<!-- bcagent-log-sha256: {hashlib.sha256(body.encode('utf-8')).hexdigest()} -->\n"
+        path.write_text(body, encoding="utf-8")
         return path
 
     # -- saved sessions (/resume, bcagent -c) -------------------------------------

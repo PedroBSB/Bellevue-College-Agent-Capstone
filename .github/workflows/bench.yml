@@ -1,0 +1,42 @@
+name: bench
+
+# Scores the default model on the 20 student tasks (bcagent bench) to catch quality regressions in
+# bcagent's prompts, edit handling and safety checks. Runs on every release tag, weekly and by hand.
+on:
+  push:
+    tags: ["v*"]
+  schedule:
+    - cron: "41 7 * * 1"     # Mondays
+  workflow_dispatch:
+    inputs:
+      models:
+        description: "comma-separated Ollama models"
+        default: "qwen2.5-coder:0.5b"
+
+jobs:
+  bench:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 60
+    env:
+      BCAGENT_NO_UPDATE: "1"
+      MODELS: ${{ github.event.inputs.models || 'qwen2.5-coder:0.5b' }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Install bcagent, the libraries and Ollama
+        run: |
+          python -m pip install -e . pytest
+          bcagent packages
+          curl -fsSL https://ollama.com/install.sh | sh
+          (ollama serve > /tmp/ollama.log 2>&1 &) && sleep 5
+          for m in ${MODELS//,/ }; do ollama pull "$m"; done
+      - name: Benchmark
+        # the default 0.5B model passes about 12 of 20 on a laptop; fail only on a clear drop
+        run: bcagent bench --models "$MODELS" --json bench-results.json --min-pass 9
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: bench-results
+          path: bench-results.json

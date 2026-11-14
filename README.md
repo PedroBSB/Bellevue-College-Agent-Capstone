@@ -228,6 +228,11 @@ read data.csv with pandas and plot the average score per week, save the plot as 
 **Enter**, press the option's **number**, `y`, `n`, or **Esc** for no. **Chat about this** lets you
 type a reply instead: *"use a while loop instead"* or *"why do you want to change line 12?"*.
 
+**Help inside bcagent:** `/help` shows every command grouped by task. `/help <topic>` explains
+one area in detail with examples. Topics: `start`, `prompts`, `actions`, `agents`, `mcp`, `git`,
+`github`, `notebooks`, `learn`, `course`, `logs`, `bench`, `data`, `safety`, `settings`,
+`troubleshooting`. From the terminal it's `bcagent help <topic>`.
+
 **Keyboard shortcuts**
 
 | Keys | Action |
@@ -274,7 +279,7 @@ offers the commit. Questions (*"how do I push to GitHub?"*) always go to the age
 
 | Command | What it does | Example |
 |---------|--------------|---------|
-| `/help` | all commands and shortcuts | `/help` |
+| `/help [topic]` | all commands, shortcuts and examples · `/help git`, `/help course`, `/help agents` … for details | `/help mcp` |
 | `/undo` | undo the last set of file changes | `/undo` |
 | `/run [file.py] [args]` | run a Python file (default: the last one bcagent wrote) | `/run temps.py` |
 | `/test [pytest args]` | run the tests; on failures offer a fix and run again | `/test -k average` |
@@ -324,6 +329,9 @@ offers the commit. Questions (*"how do I push to GitHub?"*) always go to the age
 | `bcagent doctor` | check the installation |
 | `bcagent update [--to X.Y.Z \| --list]` | update or roll back |
 | `bcagent bug "what went wrong"` | report a problem |
+| `bcagent help [topic]` | the same help as `/help`, from the terminal | `bcagent help course` |
+| `bcagent logs check <folder>` | (instructors) summarize the session logs students handed in | `bcagent logs check submissions/` |
+| `bcagent bench [--models a,b]` | score models on 20 typical student tasks | `bcagent bench --models qwen3.5:2b --pull` |
 | `bcagent --version`, `bcagent --help` | |
 
 ---
@@ -354,9 +362,9 @@ bcagent agents catalog
 | Agent | Model | Size | Good for |
 |-------|-------|------|----------|
 | `bulldog` (default, installed) | Qwen2.5-Coder 0.5B | ~400 MB | fast; short programs, exercises, explanations |
-| `bulldog-1.5b` | Qwen2.5-Coder 1.5B | ~1 GB | smarter, still fast |
+| `bulldog-1.5b` | Qwen2.5-Coder 1.5B | ~1 GB | **recommended**: best in the [benchmark](#comparing-models-benchmark) (40/40), still fast |
 | `bulldog-3b` | Qwen2.5-Coder 3B (`diff` edits) | ~1.9 GB | good quality, targeted edits of bigger files, MCP tools |
-| `bulldog-7b` | Qwen2.5-Coder 7B (`diff` edits) | ~4.7 GB | best quality; needs 8+ GB RAM |
+| `bulldog-7b` | Qwen2.5-Coder 7B (`diff` edits) | ~4.7 GB | long files and MCP tools; much slower, needs 8+ GB RAM |
 | `deepseek-1.3b`, `yi-coder-1.5b`, `granite-3b` | other small code models | 0.8–2 GB | alternatives to compare |
 | `tester` | 0.5B | – | writes pytest tests in `tests/test_<module>.py` |
 | `explainer` | 0.5B (`none`) | – | explains code and answers questions, never edits |
@@ -387,10 +395,12 @@ the recommended agent once. It never switches without asking.
 
 | Memory (RAM) | Suggested agent |
 |--------------|-----------------|
-| under 6 GB | `bulldog` (0.5B) |
-| 6–12 GB | `bulldog-1.5b` |
-| 12–24 GB | `bulldog-3b` |
-| 24 GB or more | `bulldog-7b` |
+| under 4 GB | `bulldog` (0.5B, 400 MB) |
+| 4 GB or more | `bulldog-1.5b` (1 GB) |
+
+Why not bigger agents on bigger computers? The [benchmark](#comparing-models-benchmark) showed
+that bigger was slower *and* worse for student tasks (see the results there). `bulldog-3b` and
+`bulldog-7b` are still in the catalog, and they help with MCP tools and very long files.
 
 Use `explainer` when you want to understand, not change, code.
 
@@ -694,6 +704,35 @@ profile's **fingerprint**, a short code that changes whenever the profile file c
 fingerprint in a student's log isn't the one `bcagent course show` prints for your file, the
 student used a different or edited profile.
 
+#### Step 4: check a whole class at once
+
+Download the submissions into one folder, with one subfolder per student as learning-management
+systems and GitHub Classroom do, and run:
+
+```bash
+bcagent logs check submissions/ --profile .bcagent/course.md
+```
+
+```
+Course profile CS 110 – Introduction to Python · fingerprint 3f9a1c0b7e2d · exam Dec 10 09:00–11:00
+┏━━━━━━━━━┳━━━━━━━┳━━━━━┳━━━━━━━━━┳━━━━━━━┳━━━━━━━┳━━━━━━━━━━━┳━━━━━━━━┳━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━┓
+┃ student ┃ sess. ┃ min ┃ prompts ┃ edits ┃ learn ┃ profile   ┃ log    ┃ flags                        ┃
+┡━━━━━━━━━╇━━━━━━━╇━━━━━╇━━━━━━━━━╇━━━━━━━╇━━━━━━━╇━━━━━━━━━━━╇━━━━━━━━╇━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━┩
+│ alice   │ 3     │ 74  │ 21      │ 0     │ on    │ ok        │ ok     │                              │
+│ bob     │ 1     │ 12  │ 4       │ 0     │ on    │ ok        │ EDITED │ log edited                   │
+│ chen    │ 2     │ 40  │ 9       │ 6     │ off   │ DIFFERENT │ ok     │ profile different            │
+│ eve     │ 1     │ 25  │ 3       │ 0     │ on    │ ok        │ ok     │ 2 request(s) during the exam │
+└─────────┴───────┴─────┴─────────┴───────┴───────┴───────────┴────────┴──────────────────────────────┘
+4 student(s), 7 session log(s) · 3 flagged
+Saved the table to bcagent-logs-report.csv (opens in Excel / Google Sheets)
+```
+
+For each student the table shows the number of sessions, minutes spent, prompts and edits applied,
+and whether learning mode was on. **profile** says whether the student used your profile
+(`ok`), a changed one (`DIFFERENT`) or none (`MISSING`). **log** says whether a log was edited by
+hand: every log carries a checksum. **flags** also lists requests made during the exam window. The
+same table is saved as a CSV file (`--csv grades.csv` chooses the name).
+
 > **Honest limits:** a course profile *guides* students; it isn't proctoring software. A student who
 > deletes the file, or uses another AI tool, isn't stopped. Treat it like a class policy that the
 > tool helps students follow and that the logs make visible.
@@ -831,6 +870,41 @@ only view, choose **File ▸ Save a copy in Drive** in Colab and link the copy.
 
 ---
 
+## Comparing models (benchmark)
+
+`bcagent bench` measures how well models do typical student work. It has 20 small tasks: writing
+functions, fixing bugs, pandas and statsmodels, a notebook cell, editing one function in a long file,
+and writing tests. Each task runs through bcagent's normal agent loop in a fresh folder and is
+checked automatically by running the code:
+
+```bash
+bcagent bench                                          # the models of your installed agents
+bcagent bench --models qwen2.5-coder:0.5b,qwen3.5:2b   # compare models (add --pull to download them)
+bcagent bench --tasks fizzbuzz,big_file --repeat 3     # some tasks, several times
+bcagent bench --list                                   # the 20 tasks
+```
+
+It prints a pass rate and the speed per model, and saves the details in `~/.bcagent/bench/`.
+
+**Results** (November 2026, a MacBook with an M-series chip, each of the 20 tasks run twice through
+bcagent 1.8):
+
+| Model | Passed | Seconds per task | write | fix | data | tests |
+|-------|--------|------------------|-------|-----|------|-------|
+| **qwen2.5-coder 1.5B** (`bulldog-1.5b`) | **40/40** | 1.6 | 20/20 | 10/10 | 8/8 | 2/2 |
+| qwen2.5-coder 7B (`bulldog-7b`) | 36/40 | 22.6 | 18/20 | 8/10 | 8/8 | 2/2 |
+| qwen3 0.6B | 27/40 | 0.8 | 13/20 | 8/10 | 6/8 | 0/2 |
+| qwen2.5-coder 0.5B (`bulldog`, default) | 25/40 | 1.4 | 15/20 | 6/10 | 4/8 | 0/2 |
+| qwen3.5 0.8B | 21/40 | 3.6 | 9/20 | 6/10 | 6/8 | 0/2 |
+| gemma3 1B | 19/40 | 2.9 | 13/20 | 6/10 | 0/8 | 0/2 |
+
+That's why bcagent suggests `bulldog-1.5b` to every computer with 4 GB of RAM or more: it got
+everything right, at almost the same speed as the default. Run `bcagent bench` on your own machine,
+because speed depends a lot on the computer. The `bench` workflow re-runs the default model with
+every release to catch quality regressions.
+
+---
+
 ## Safety and privacy
 
 - **Your code stays on your computer.** The model runs locally through Ollama. bcagent connects to
@@ -843,6 +917,10 @@ only view, choose **File ▸ Save a copy in Drive** in Colab and link the copy.
   model only that part, and the model sends back just the new version. bcagent then puts it into
   the full file, so everything else stays exactly as it was. If the agent ever tries to rewrite a
   long file it saw only partly, which would delete the rest, bcagent refuses.
+- **Lazy answers can't delete code.** Small models often answer with only the function they
+  changed. bcagent notices and puts that function into the full file instead of saving it alone.
+- **Forgotten imports are added.** If the new code uses `json`, `datetime`, `pd`, `np`, `smf` and
+  so on without importing them, bcagent adds the import line and tells you.
 - **Tests stay honest.** While fixing failing tests, bcagent doesn't let the model edit the test
   files.
 - **Secrets stay private.** Secret-looking files aren't committed without your confirmation, and
@@ -929,16 +1007,17 @@ Settings live in `~/.bcagent/config.json` (on Windows `%USERPROFILE%\.bcagent\co
 ```bash
 git clone https://github.com/PedroBSB/Bellevue-College-Agent-Capstone.git && cd Bellevue-College-Agent-Capstone
 python -m venv .venv && .venv/bin/pip install -e . pytest
-.venv/bin/python -m pytest -q tests     # ~85 tests, offline; never touches your accounts or ~/.ssh
+.venv/bin/python -m pytest -q tests     # ~100 tests, offline; never touches your accounts or ~/.ssh
 ```
 
-CI runs two workflows. `tests` runs the test suite on macOS, Linux and Windows. `installers` runs
+CI runs three workflows. `tests` runs the test suite on macOS, Linux and Windows. `installers` runs
 the real installers on fresh macOS, Ubuntu and Windows machines, and in a bare Ubuntu container with
 no Python and a student account without admin rights. That second workflow also runs every Monday
-to catch changes in Ollama, Python or PyPI.
+to catch changes in Ollama, Python or PyPI. `bench` scores the default model on the 20
+student tasks with every release and weekly, and fails on a clear drop in quality.
 
 **Releasing:** bump the version in `bcagent/__init__.py` and `pyproject.toml`, commit, then
-`git tag v1.7.0 && git push origin main v1.7.0`. The `release` workflow runs the tests on macOS,
+`git tag v1.8.0 && git push origin main v1.8.0`. The `release` workflow runs the tests on macOS,
 Linux and Windows, checks that the tag matches the version, and publishes the GitHub release.
 Installed copies update only after that.
 
@@ -949,7 +1028,7 @@ bcagent/
 ├── pyproject.toml
 ├── examples/                                 course profiles, a custom agent and an MCP server to copy
 ├── tests/                                    pytest suite (CI on macOS, Linux and Windows)
-├── .github/workflows/                        ci.yml (tests) · installers.yml · release.yml (tag vX.Y.Z → tested release)
+├── .github/workflows/                        ci.yml (tests) · installers.yml · bench.yml · release.yml (tag → tested release)
 └── bcagent/
     ├── cli.py        command line, interactive prompt, slash commands, subcommands
     ├── session.py    the agent loop: prompt → model → edits → approval → check → repair; /test /review /export
@@ -958,6 +1037,10 @@ bcagent/
     ├── sections.py   big files: show only the named functions, splice the model's new versions back
     ├── course.py     course profiles for instructors (learning mode lock, exams, allowed agents, logs)
     ├── hardware.py   memory detection and the recommended agent
+    ├── imports.py    adds imports the model forgot (json, datetime, pd, np, …)
+    ├── logs.py       `bcagent logs check`: summarize students' session logs
+    ├── bench.py      `bcagent bench`: 20 student tasks to score models
+    ├── helptext.py   /help and `bcagent help` topics
     ├── agents.py     built-in agent, catalog, installing and creating agents
     ├── actions.py    plain-language requests → built-in actions (commit, push, tests, colab…)
     ├── mcp.py        MCP client, public server catalog, ~/.bcagent/mcp.json

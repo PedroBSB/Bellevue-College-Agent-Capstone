@@ -124,11 +124,10 @@ def test_install_and_command(tmp_path, monkeypatch):
 
 
 def test_recommend_tiers():
-    assert hardware.recommend(4)[0] == "bulldog"
+    assert hardware.recommend(3)[0] == "bulldog"
     assert hardware.recommend(8)[0] == "bulldog-1.5b"
-    assert hardware.recommend(16)[0] == "bulldog-3b"
-    assert hardware.recommend(64)[0] == "bulldog-7b"
-    assert hardware.recommend(64, allowed=["bulldog", "bulldog-1.5b"])[0] == "bulldog-1.5b"
+    assert hardware.recommend(64)[0] == "bulldog-1.5b"   # bench: bigger models were slower and worse
+    assert hardware.recommend(64, allowed=["bulldog", "explainer"])[0] == "bulldog"
     assert hardware.total_ram_gb() is None or hardware.total_ram_gb() > 0.5
 
 
@@ -143,7 +142,7 @@ def test_suggest_once(make_session, monkeypatch):
     cfg = {}
     hardware.maybe_suggest(s, cfg, None)
     hardware.maybe_suggest(s, cfg, None)
-    assert len(asked) == 1 and cfg["recommend_asked"] is True and "bulldog-3b" in asked[0]
+    assert len(asked) == 1 and cfg["recommend_asked"] is True and "bulldog-1.5b" in asked[0]
 
 
 def test_learning_mode_hides_long_solutions(make_session, tmp_path):

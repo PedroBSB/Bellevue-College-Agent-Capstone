@@ -10,7 +10,7 @@ def big_file(n=3000):
 
 
 def test_whole_rewrite_of_truncated_file_is_blocked(make_session):
-    s = make_session("FILE: big.py\n```python\ndef f0():\n    return 0\n```\n")
+    s = make_session("FILE: big.py\n```python\nprint('a brand new program')\nprint('that replaces it all')\n```\n")
     original = big_file()
     (s.project.root / "big.py").write_text(original)
     s.turn("clean up @big.py")
@@ -101,7 +101,7 @@ def test_run_tests_fix_loop(make_session, monkeypatch):
 
 def test_guard_covers_code_saved_without_file_line(make_session):
     # the model forgets the FILE: line; bcagent's "save the code" path must still be guarded
-    s = make_session("Here you go:\n```python\ndef f0():\n    return 100\n" + "# filler\n" * 5 + "```\n")
+    s = make_session("Here you go:\n```python\nprint('rewritten from scratch')\n" + "# filler\n" * 5 + "```\n")
     original = big_file()
     (s.project.root / "big.py").write_text(original)
     s.turn("make @big.py faster")
@@ -152,3 +152,28 @@ def test_big_file_function_edit_is_spliced(make_session):
     text = (s.project.root / "big.py").read_text(encoding="utf-8")
     assert "return 700" in text and "def f2999" in text and text.count("def f") == 3000
     assert text.index("def helper") < text.index("if __name__")
+
+
+def test_lazy_partial_rewrite_is_spliced(make_session):
+    s = make_session("FILE: tools.py\n```python\ndef b():\n    return 20\n```\n")
+    original = "".join(f"def {n}():\n    return {i}\n\n\n" for i, n in enumerate("abcdef"))
+    (s.project.root / "tools.py").write_text(original)
+    s.turn("make b in @tools.py return 20")
+    text = (s.project.root / "tools.py").read_text(encoding="utf-8")
+    assert "return 20" in text and all(f"def {n}()" in text for n in "abcdef")
+
+
+def test_asking_to_remove_functions_is_respected(make_session):
+    s = make_session("FILE: tools.py\n```python\ndef a():\n    return 0\n```\n")
+    (s.project.root / "tools.py").write_text("".join(f"def {n}():\n    return 1\n\n\n" for n in "abcdef"))
+    s.turn("remove every function except a from @tools.py")
+    text = (s.project.root / "tools.py").read_text(encoding="utf-8")
+    assert "def b" not in text
+
+
+def test_lazy_answer_on_truncated_file_keeps_everything(make_session):
+    s = make_session("FILE: big.py\n```python\ndef f0():\n    return 100\n```\n")
+    (s.project.root / "big.py").write_text(big_file())
+    s.turn("clean up @big.py")
+    text = (s.project.root / "big.py").read_text(encoding="utf-8")
+    assert "return 100" in text and text.count("def f") == 3000

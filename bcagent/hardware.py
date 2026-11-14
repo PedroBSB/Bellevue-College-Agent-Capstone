@@ -13,9 +13,10 @@ from typing import Optional, Tuple
 
 from .ui import console
 
-# (minimum RAM in GB, agent, download size) – the model should use well under half the memory
-TIERS = [(24, "bulldog-7b", "4.7 GB"), (12, "bulldog-3b", "1.9 GB"), (6, "bulldog-1.5b", "1 GB"),
-         (0, "bulldog", "400 MB")]
+# (minimum RAM in GB, agent, download size), chosen with `bcagent bench` (20 student tasks × 2 runs,
+# November 2026): qwen2.5-coder 1.5B passed 40/40 at 1.6 s per task, 7B 36/40 at 22.6 s, 0.5B 25/40 at
+# 1.4 s. Bigger was slower *and* worse, so 1.5B is the suggestion for every computer that can hold it.
+TIERS = [(4, "bulldog-1.5b", "1 GB"), (0, "bulldog", "400 MB")]
 ASK_AGAIN = 7 * 24 * 3600   # "Not now" asks again after a week
 
 
