@@ -568,11 +568,19 @@ class Session:
     def execute(self, cmd: str) -> Optional[bool]:
         """Run a command, share its output with the model and offer to fix failures.
         Returns None normally, True if a follow-up turn was started."""
+        watch = makes_files(cmd)
+        before = image_snapshot(self.project.root) if watch else {}
         code, out = run_command(cmd, str(self.project.root))
-        self.notes.append(f"I ran `{cmd}` (exit code {code}). Output:\n```\n{out[-2500:]}\n```")
-        self.log("command", cmd, code=code, output=out[-1500:])
+        images = new_images(before, image_snapshot(self.project.root)) if watch else []
+        note = f"I ran `{cmd}` (exit code {code}). Output:\n```\n{out[-2500:]}\n```"
+        if images:
+            note += f"\nIt created or updated: {', '.join(images)}"
+        self.notes.append(note)
+        self.log("command", cmd, code=code, output=out[-1500:], images=images)
         if code == 0:
             console.print("  [ok]⎿  done[/]")
+        self.show_images(images)
+        if code == 0:
             return None
         console.print(f"  [err]⎿  exit code {code}[/]")
         m = re.search(r"No module named '([\w.]+)'", out)
@@ -592,6 +600,20 @@ class Session:
         self.notes.pop()
         self.turn(f"I ran `{cmd}` and it failed with exit code {code}:\n```\n{out[-3000:]}\n```{extra}")
         return True
+
+    def show_images(self, images: List[str]) -> None:
+        """Point out the plots / pictures a command made and open them in the system viewer."""
+        for rel in images[:MAX_SHOWN]:
+            path = (self.project.root / rel).resolve()
+            console.print(f"  [ok]⎿[/]  🖼  [link={path.as_uri()}]{escape(rel)}[/link]", highlight=False)
+        if len(images) > MAX_SHOWN:
+            console.print(f"  [muted]   … and {len(images) - MAX_SHOWN} more[/]")
+        if not images or self.print_mode or not ui.is_interactive() or not self.cfg.get("open_images", True):
+            return
+        for rel in images[:MAX_OPENED]:
+            if not open_file(self.project.root / rel):
+                console.print("  [muted]   (could not open a viewer here – open the file yourself)[/]")
+                break
 
     def run_suggestions(self, applied: List[str], commands: List[str], problems: List[str]) -> List[str]:
         """Offer to run the Python scripts bcagent just wrote when the model didn't suggest it."""
@@ -852,6 +874,70 @@ def is_runnable_script(path: Path) -> bool:
             continue  # docstring
         return True
     return False
+
+
+IMAGE_EXTS = {".png", ".jpg", ".jpeg", ".gif", ".svg", ".webp", ".bmp", ".tif", ".tiff", ".pdf"}
+SKIP_DIRS = {"node_modules", "__pycache__", "venv", "env", "site-packages", "build", "dist", "Library",
+             "Applications", "AppData"}
+MAX_SHOWN, MAX_OPENED = 5, 3
+
+
+def makes_files(cmd: str) -> bool:
+    """False for commands that never produce plots (git, pip, ...), so they skip the folder scan."""
+    return not re.match(r"\s*(git|gh|pip3?|cd|ls|dir|cat|type|echo)\b", cmd) and " -m pip " not in f"{cmd} "
+
+
+def image_snapshot(root: Path, depth: int = 2, limit: int = 5000) -> dict:
+    """{relative path: mtime} of the images in the project (a shallow, capped scan: it must stay fast
+    even when the project folder is the home folder)."""
+    found: dict = {}
+    seen = 0
+    todo = [(Path(root), 0)]
+    while todo and seen < limit:
+        folder, level = todo.pop()
+        try:
+            entries = list(os.scandir(folder))
+        except OSError:
+            continue
+        for e in entries:
+            seen += 1
+            if e.name.startswith("."):
+                continue
+            try:
+                if e.is_dir(follow_symlinks=False):
+                    if level < depth and e.name not in SKIP_DIRS:
+                        todo.append((Path(e.path), level + 1))
+                elif Path(e.name).suffix.lower() in IMAGE_EXTS:
+                    found[Path(e.path).relative_to(root).as_posix()] = e.stat().st_mtime_ns
+            except (OSError, ValueError):
+                continue
+    return found
+
+
+def new_images(before: dict, after: dict) -> List[str]:
+    """Images that are new or were rewritten between two snapshots, newest first."""
+    changed = [p for p, t in after.items() if before.get(p) != t]
+    return sorted(changed, key=lambda p: (-after[p], p))
+
+
+def open_file(path: Path) -> bool:
+    """Open a file in the system's default app (Preview, Photos, an image viewer) without waiting."""
+    if os.environ.get("SSH_CONNECTION") or os.environ.get("SSH_TTY"):
+        return False  # the viewer would open on the remote computer's screen, not yours
+    try:
+        if sys.platform == "darwin":
+            cmd = ["open", str(path)]
+        elif os.name == "nt":
+            os.startfile(str(path))  # type: ignore[attr-defined]
+            return True
+        else:
+            if not (os.environ.get("DISPLAY") or os.environ.get("WAYLAND_DISPLAY")) or not shutil.which("xdg-open"):
+                return False
+            cmd = ["xdg-open", str(path)]
+        subprocess.Popen(cmd, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, start_new_session=True)
+        return True
+    except OSError:
+        return False
 
 
 def _quote(arg: str) -> str:

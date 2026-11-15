@@ -4,7 +4,7 @@
 #
 #   ./install.sh                 # full install
 #   ./install.sh --no-model      # skip downloading the model (downloads on first run instead)
-#   ./install.sh --no-packages   # skip numpy, pandas, scikit-learn, statsmodels, statsformula (installed on first run)
+#   ./install.sh --no-packages   # skip numpy, pandas, matplotlib, scikit-learn, statsmodels, statsformula (installed on first run)
 #   ./install.sh --user          # never use sudo: Python and Ollama go into ~/.bcagent if missing
 #                                #   (done automatically when you are not an administrator)
 #   ./install.sh --uninstall     # remove bcagent (keeps settings, Ollama and Python)
@@ -443,7 +443,7 @@ fi
 
 # ---------------------------------------------------------------- 5. default libraries
 if [ "${SKIP_PACKAGES:-0}" -eq 0 ]; then
-  say "Installing the default Python libraries for your code: numpy, pandas, scikit-learn, statsmodels, statsformula"
+  say "Installing the default Python libraries for your code: numpy, pandas, matplotlib, scikit-learn, statsmodels, statsformula"
   "$BCAGENT_HOME/venv/bin/bcagent" packages && ok "libraries ready" \
     || warn "some libraries could not be installed – bcagent tries again when it starts"
 fi

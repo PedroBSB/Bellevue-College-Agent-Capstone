@@ -96,8 +96,8 @@ models, so read the diff before you accept it. For harder work, install a bigger
 ## Install
 
 The installer sets up everything that is missing: **Python**, **Ollama**, **bcagent** itself, the
-default **model**, and the default **data-science libraries** (numpy, pandas, scikit-learn,
-statsmodels, statsformula). It needs no administrator rights.
+default **model**, and the default **data-science libraries** (numpy, pandas, matplotlib,
+scikit-learn, statsmodels, statsformula). It needs no administrator rights.
 
 | Your computer | Run this in a terminal |
 |---------------|------------------------|
@@ -122,7 +122,7 @@ bcagent doctor        # checks Python, Ollama, the model, git, GitHub sign-in an
 | `bcagent` command | `~/.local/bin/bcagent` | same | `%USERPROFILE%\.bcagent\bin\bcagent.cmd` |
 | Ollama (if missing) | Homebrew, or Ollama.app (`~/Applications` without admin) | `ollama.com/install.sh`; **no sudo:** `~/.bcagent/ollama` | winget or `OllamaSetup.exe`; **blocked:** portable `ollama.exe` |
 | Default model | `ollama pull qwen2.5-coder:0.5b` (~400 MB) | same | same |
-| Libraries for your code | numpy, pandas, scikit-learn, statsmodels, statsformula in `~/.bcagent/runenv` | same | same |
+| Libraries for your code | numpy, pandas, matplotlib, scikit-learn, statsmodels, statsformula in `~/.bcagent/runenv` | same | same |
 
 Options:
 
@@ -744,7 +744,7 @@ day (AI off for two hours), and a statistics course with its own agent.
 
 ## Data science: built-in libraries and notebooks
 
-Code that bcagent runs can always use **numpy, pandas, scikit-learn, statsmodels and
+Code that bcagent runs can always use **numpy, pandas, matplotlib, scikit-learn, statsmodels and
 [statsformula](https://github.com/PedroBSB/statsformula)** (R-style formulas for Python). The agent
 knows they are installed, so requests like these just work:
 
@@ -969,10 +969,11 @@ Settings live in `~/.bcagent/config.json` (on Windows `%USERPROFILE%\.bcagent\co
 | `max_tokens` | `4096` | longest answer |
 | `max_repairs` | `2` | automatic fix attempts after a syntax error |
 | `ollama_host` | `null` | Ollama address (default `http://127.0.0.1:11434`) |
-| `default_packages` | numpy, pandas, scikit-learn, statsmodels, statsformula | libraries for your code (`[]` = none) |
+| `default_packages` | numpy, pandas, matplotlib, scikit-learn, statsmodels, statsformula | libraries for your code (`[]` = none) |
 | `learn_mode` | `false` | start every session in learning mode |
 | `bug_reports` | `true` | offer to report internal errors |
 | `auto_update` | `true` | update automatically |
+| `open_images` | `true` | open the plots and images your program saves (e.g. `plt.savefig("plot.png")`) when it finishes |
 | `pinned_version` | – | set by `bcagent update --to`; pauses automatic updates |
 | `recommend_asked` | – | set once bcagent has suggested an agent for your computer |
 

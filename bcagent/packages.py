@@ -1,6 +1,6 @@
 """Default Python libraries in the environment where bcagent runs your code.
 
-Every bcagent install has numpy, pandas, scikit-learn, statsmodels and statsformula available in
+Every bcagent install has numpy, pandas, matplotlib, scikit-learn, statsmodels and statsformula available in
 its run environment (~/.bcagent/runenv), so data-analysis code the agent writes runs right away.
 bcagent checks at start-up (a fast check, no network) and installs whatever is missing. The
 installers already do this at install time.
@@ -20,7 +20,7 @@ from . import ui
 from .ui import console
 
 # pip name -> (import name, minimum Python minor version)
-DEFAULT = ["numpy", "pandas", "scikit-learn", "statsmodels", "statsformula"]
+DEFAULT = ["numpy", "pandas", "matplotlib", "scikit-learn", "statsmodels", "statsformula"]
 IMPORT_NAME = {"scikit-learn": "sklearn", "pyyaml": "yaml", "beautifulsoup4": "bs4", "pillow": "PIL",
                "opencv-python": "cv2", "python-dateutil": "dateutil"}
 NEEDS_PY = {"statsformula": (3, 10)}
@@ -30,7 +30,9 @@ PROMPT_NOTE = """Installed Python libraries (use them for data analysis, statist
 standard library for everything else): {libs}.
 - statsformula gives R-style formulas: `import statsformula as sf; y, X = sf.dmatrices("y ~ x1 + C(group)", df)`
   and `from statsformula.sklearn import FormulaEstimator` to use a formula with a scikit-learn model.
-- statsmodels: `import statsmodels.formula.api as smf; smf.ols("y ~ x", data=df).fit().summary()`."""
+- statsmodels: `import statsmodels.formula.api as smf; smf.ols("y ~ x", data=df).fit().summary()`.
+- matplotlib: `import matplotlib.pyplot as plt`; save plots with `plt.savefig("name.png")` (bcagent opens saved
+  images for the user), not `plt.show()`."""
 
 
 def wanted(cfg: Optional[dict] = None) -> List[str]:

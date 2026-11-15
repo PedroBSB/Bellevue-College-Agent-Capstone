@@ -6,7 +6,7 @@
 #
 #   powershell -ExecutionPolicy Bypass -File install.ps1            # full install
 #   powershell -ExecutionPolicy Bypass -File install.ps1 -NoModel   # skip model download
-#   powershell -ExecutionPolicy Bypass -File install.ps1 -NoPackages   # skip numpy/pandas/scikit-learn/statsmodels/statsformula
+#   powershell -ExecutionPolicy Bypass -File install.ps1 -NoPackages   # skip numpy/pandas/matplotlib/scikit-learn/statsmodels/statsformula
 #   powershell -ExecutionPolicy Bypass -File install.ps1 -Uninstall
 #   powershell -ExecutionPolicy Bypass -File install.ps1 -UninstallAll   (removes EVERYTHING incl. Ollama; -Yes skips the question)
 param([switch]$NoModel, [switch]$NoPackages, [switch]$Uninstall, [switch]$UninstallAll, [switch]$Yes)
@@ -303,7 +303,7 @@ if (-not $NoModel) {
 
 # ------------------------------------------------------------------ 5. default libraries
 if (-not $NoPackages) {
-  Say "Installing the default Python libraries for your code: numpy, pandas, scikit-learn, statsmodels, statsformula"
+  Say "Installing the default Python libraries for your code: numpy, pandas, matplotlib, scikit-learn, statsmodels, statsformula"
   & "$BcHome\venv\Scripts\bcagent.exe" packages
   if ($LASTEXITCODE -eq 0) { Ok "libraries ready" } else { Warn "some libraries could not be installed - bcagent tries again when it starts" }
 }

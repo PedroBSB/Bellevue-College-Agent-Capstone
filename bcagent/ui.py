@@ -170,7 +170,7 @@ TIPS = [
     "Run [bc]/init[/] to create a BCAGENT.md with notes about your project",
     "[bc]shift+tab[/] auto-accepts edits · [bc]![/]cmd runs a shell command",
     "Just say [bc]commit and push[/] or [bc]run the tests[/] · [bc]/learn[/] for hints instead of answers",
-    "numpy, pandas, scikit-learn, statsmodels and statsformula are ready to use",
+    "numpy, pandas, matplotlib, scikit-learn, statsmodels and statsformula are ready to use",
 ]
 
 

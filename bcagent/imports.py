@@ -22,7 +22,7 @@ COMMON = {"json", "os", "sys", "re", "math", "random", "datetime", "time", "csv"
           "functools", "pathlib", "string", "statistics", "typing", "dataclasses", "subprocess", "shutil",
           "glob", "copy", "decimal", "fractions", "heapq", "bisect", "operator", "textwrap", "unittest",
           "argparse", "logging", "pickle", "sqlite3", "hashlib", "uuid", "calendar", "pprint", "io", "tempfile",
-          "pandas", "numpy", "sklearn", "statsmodels", "statsformula", "pytest"}
+          "pandas", "numpy", "matplotlib", "sklearn", "statsmodels", "statsformula", "pytest"}
 STDLIB = set(getattr(sys, "stdlib_module_names", ())) | COMMON
 FROM_IMPORTS = {"Path": "from pathlib import Path", "dataclass": "from dataclasses import dataclass",
                 "defaultdict": "from collections import defaultdict", "Counter": "from collections import Counter",

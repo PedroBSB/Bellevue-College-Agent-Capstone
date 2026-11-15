@@ -5,7 +5,7 @@ from bcagent import packages
 
 def test_defaults_and_import_names(monkeypatch):
     monkeypatch.delenv("BCAGENT_NO_PACKAGES", raising=False)
-    assert packages.wanted({}) == ["numpy", "pandas", "scikit-learn", "statsmodels", "statsformula"]
+    assert packages.wanted({}) == ["numpy", "pandas", "matplotlib", "scikit-learn", "statsmodels", "statsformula"]
     assert packages.wanted({"default_packages": []}) == []
     assert packages.import_name("scikit-learn") == "sklearn"
     assert packages.pip_name_for("sklearn.linear_model") == "scikit-learn"

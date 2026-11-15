@@ -37,7 +37,7 @@ GROUPS: List[Tuple[str, List[Tuple[str, str]]]] = [
         ("/test [pytest args]", "run the tests; offers to fix failures in your code and runs them again"),
         ("/add /drop /files", "always include a file in the context / stop / list"),
         ("/init", "create BCAGENT.md – notes the agent reads with every request"),
-        ("/packages", "check the built-in libraries (numpy, pandas, scikit-learn, statsmodels, statsformula)"),
+        ("/packages", "check the built-in libraries (numpy, pandas, matplotlib, scikit-learn, statsmodels, statsformula)"),
     ]),
     ("Learning", [
         ("/learn [on|off]", "learning mode: hints and explanations instead of finished code"),
@@ -243,7 +243,7 @@ the exam window. Flags are a reason to ask the student, not proof."""),
 fresh folder and checked automatically by running the code. Shows the pass rate and speed per model;
 results are saved in ~/.bcagent/bench/."""),
 
-    "data": ("Data science", """Code bcagent runs can always use [bold]numpy, pandas, scikit-learn, statsmodels and statsformula[/].
+    "data": ("Data science", """Code bcagent runs can always use [bold]numpy, pandas, matplotlib, scikit-learn, statsmodels and statsformula[/].
 
   [bc]read sales.csv with pandas and print the average revenue per month[/]
   [bc]fit a regression of price on size and rooms with statsmodels and print the summary[/]
@@ -261,7 +261,7 @@ statsformula: [bc]import statsformula as sf; y, X = sf.dmatrices("y ~ x + C(grou
 
     "settings": ("Settings", """~/.bcagent/config.json:
   agent · num_ctx (how much the model sees, tokens) · max_tokens · max_repairs · ollama_host
-  default_packages · learn_mode · bug_reports · auto_update · pinned_version
+  default_packages · learn_mode · bug_reports · auto_update · open_images (open the plots a run saves) · pinned_version
 Environment: BCAGENT_HOME · BCAGENT_LEARN=1 · BCAGENT_NO_UPDATE=1 · BCAGENT_NO_PACKAGES=1 ·
 GH_TOKEN / GITHUB_TOKEN · BCAGENT_GOOGLE_TOKEN · OLLAMA_HOST
 

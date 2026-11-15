@@ -40,7 +40,7 @@ COMMANDS = [
     ("/export", "Save this session as a Markdown log (to hand in with an assignment)"),
     ("/resume", "Continue an earlier conversation in this folder"),
     ("/bug", "Report a problem with bcagent on GitHub: /bug [what happened]"),
-    ("/packages", "Check / install the default libraries (numpy, pandas, scikit-learn, statsmodels, statsformula)"),
+    ("/packages", "Check / install the default libraries (numpy, pandas, matplotlib, scikit-learn, statsmodels, statsformula)"),
     ("/course", "Show the course profile your instructor set (learning mode, exam times, allowed agents)"),
     ("/run", "Run a Python file: /run [file.py] [args] (default: the last file bcagent wrote)"),
     ("/undo", "Undo the last set of file edits"),
@@ -1040,7 +1040,7 @@ def main(argv: Optional[List[str]] = None) -> None:
         sys.exit(1)
     if not a.print_mode:
         try:
-            packages_mod.ensure(cfg)   # numpy, pandas, scikit-learn, statsmodels, statsformula
+            packages_mod.ensure(cfg)   # numpy, pandas, matplotlib, scikit-learn, statsmodels, statsformula
         except Exception as e:  # never block start-up
             console.print(f"[warn]⚠ could not check the default libraries: {escape(str(e))}[/]")
     session = Session(project, agent, cfg, client, auto=a.yes, print_mode=a.print_mode)

@@ -177,3 +177,52 @@ def test_lazy_answer_on_truncated_file_keeps_everything(make_session):
     s.turn("clean up @big.py")
     text = (s.project.root / "big.py").read_text(encoding="utf-8")
     assert "return 100" in text and text.count("def f") == 3000
+
+
+def test_plot_saved_by_a_run_is_shown(make_session, monkeypatch):
+    s = make_session()
+    opened = []
+
+    def fake_run(cmd, cwd, extra=None):
+        (s.project.root / "isoflop.png").write_bytes(b"\x89PNG")
+        return 0, "N[168]: 1.833e+09\n"
+    monkeypatch.setattr("bcagent.session.run_command", fake_run)
+    monkeypatch.setattr("bcagent.session.open_file", lambda p: opened.append(p.name) or True)
+    monkeypatch.setattr(ui, "is_interactive", lambda: True)
+    s.print_mode = False
+    (s.project.root / "old.png").write_bytes(b"\x89PNG")    # existed before the run: not shown
+    s.execute("python isoflop.py")
+    assert opened == ["isoflop.png"]
+    assert "isoflop.png" in s.notes[-1] and "old.png" not in s.notes[-1]
+    assert s.events[-1]["images"] == ["isoflop.png"]
+
+
+def test_plot_not_opened_when_disabled_or_non_interactive(make_session, monkeypatch):
+    opened = []
+    monkeypatch.setattr("bcagent.session.open_file", lambda p: opened.append(p) or True)
+    for interactive, cfg in ((False, {}), (True, {"open_images": False})):
+        s = make_session(cfg=cfg)
+        s.print_mode = not interactive
+        monkeypatch.setattr(ui, "is_interactive", lambda: interactive)
+        monkeypatch.setattr("bcagent.session.run_command",
+                            lambda cmd, cwd, extra=None: ((s.project.root / "p.png").write_bytes(b"x"), (0, ""))[1])
+        s.execute("python plot.py")
+    assert opened == []
+
+
+def test_image_snapshot_skips_hidden_and_env_folders(tmp_path):
+    from bcagent.session import image_snapshot, new_images
+    for rel in ("a.png", "figs/b.svg", ".git/c.png", "venv/d.png", "x/y/z/deep.png", "notes.txt"):
+        (tmp_path / rel).parent.mkdir(parents=True, exist_ok=True)
+        (tmp_path / rel).write_bytes(b"x")
+    snap = image_snapshot(tmp_path)
+    assert sorted(snap) == ["a.png", "figs/b.svg"]
+    assert new_images(snap, snap) == []
+    assert new_images({}, snap) and set(new_images({}, snap)) == {"a.png", "figs/b.svg"}
+
+
+def test_pip_and_git_skip_the_scan():
+    from bcagent.session import makes_files
+    assert makes_files("python isoflop.py") and makes_files("python3 -m mymod")
+    assert not makes_files("pip install x") and not makes_files("python -m pip install x")
+    assert not makes_files("git status")

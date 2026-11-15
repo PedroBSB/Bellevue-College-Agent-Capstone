@@ -28,7 +28,7 @@ jobs:
           export PATH="$HOME/.local/bin:$PATH"
           bcagent --version
           bcagent doctor
-          "$HOME/.bcagent/runenv/bin/python" -c "import numpy, pandas, sklearn, statsmodels, statsformula; print('libraries OK')"
+          "$HOME/.bcagent/runenv/bin/python" -c "import numpy, pandas, matplotlib, sklearn, statsmodels, statsformula; print('libraries OK')"
           bcagent course create && bcagent course show
       - name: Uninstall
         run: ./uninstall.sh && test ! -e "$HOME/.local/bin/bcagent"
@@ -51,7 +51,7 @@ jobs:
       - name: Check
         run: |
           su student -c '~/.local/bin/bcagent --version && ~/.local/bin/bcagent doctor'
-          su student -c '~/.bcagent/runenv/bin/python -c "import numpy, pandas, sklearn, statsmodels, statsformula; print(\"libraries OK\")"'
+          su student -c '~/.bcagent/runenv/bin/python -c "import numpy, pandas, matplotlib, sklearn, statsmodels, statsformula; print(\"libraries OK\")"'
 
   windows:
     name: windows installer
@@ -67,5 +67,5 @@ jobs:
           & "$env:USERPROFILE\.bcagent\bin\bcagent.cmd" --version
           if ($LASTEXITCODE -ne 0) { exit 1 }
           & "$env:USERPROFILE\.bcagent\bin\bcagent.cmd" doctor
-          & "$env:USERPROFILE\.bcagent\runenv\Scripts\python.exe" -c "import numpy, pandas, sklearn, statsmodels, statsformula; print('libraries OK')"
+          & "$env:USERPROFILE\.bcagent\runenv\Scripts\python.exe" -c "import numpy, pandas, matplotlib, sklearn, statsmodels, statsformula; print('libraries OK')"
           if ($LASTEXITCODE -ne 0) { exit 1 }
