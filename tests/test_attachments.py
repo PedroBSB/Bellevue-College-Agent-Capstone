@@ -1,3 +1,4 @@
+import os
 from pathlib import Path
 
 from bcagent import attachments as am, cli
@@ -9,10 +10,13 @@ def test_dropped_paths_in_every_terminal_style(tmp_path):
     img = tmp_path / "My Pictures" / "plot.png"
     img.parent.mkdir()
     img.write_bytes(PNG)
-    escaped = str(img).replace(" ", "\\ ")
-    for text in (escaped, f"'{img}'", f'"{img}"', "file://" + str(img).replace(" ", "%20")):
-        assert [p for _, p in am.dropped_paths(f"look at {text} please", windows=False)] == [img.resolve()]
-    assert am.dropped_paths("fix /not/a/real/file.py and calc.py", windows=False) == []
+    windows = os.name == "nt"
+    styles = [f"'{img}'", f'"{img}"', img.as_uri()]
+    if not windows:
+        styles.append(str(img).replace(" ", "\\ "))   # macOS Terminal escapes spaces
+    for text in styles:
+        assert [p for _, p in am.dropped_paths(f"look at {text} please", windows=windows)] == [img.resolve()]
+    assert am.dropped_paths("fix /not/a/real/file.py and calc.py", windows=windows) == []
 
 
 def test_windows_paths_keep_backslashes():

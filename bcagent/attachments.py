@@ -147,7 +147,7 @@ def file_note(a: Attachment) -> str:
     if b"\x00" in raw[:4096]:
         return (f"The user attached {a.label} ({a.path}, {len(raw)} bytes). It is a binary file, "
                 "so its content is not shown.")
-    text = raw.decode("utf-8", errors="replace")
+    text = raw.decode("utf-8", errors="replace").replace("\r\n", "\n")
     if len(text) > MAX_FILE_CHARS:
         text = text[:MAX_FILE_CHARS] + "\n... (truncated)\n"
     return f"The user attached {a.label} ({a.path}):\n```\n{text}\n```"
