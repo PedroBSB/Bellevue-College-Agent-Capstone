@@ -21,7 +21,7 @@ from rich.markdown import Markdown
 from rich.markup import escape
 from rich.text import Text
 
-from . import course as course_mod, packages as packages_mod, ui
+from . import attachments as attach_mod, course as course_mod, packages as packages_mod, ui
 from .agents import Agent
 from .config import HOME
 from .colab import ColabError, ColabSync, check_source
@@ -65,6 +65,8 @@ class Session:
         self.print_mode = print_mode    # -p: non-interactive
         self.history: List[dict] = []
         self.notes: List[str] = []      # e.g. output of "!cmd" to share with the model
+        self.attachments = attach_mod.Attachments(project.root)   # files/images dropped on the terminal
+        self.images: List[str] = []     # base64 images for the next message (vision models only)
         self.undo_stack: List[List[Tuple[str, Optional[str]]]] = []
         self.mcp = MCPManager(project.root)
         self.trusted_tools: set = set()  # MCP tools the user allowed for the whole session
@@ -198,8 +200,39 @@ class Session:
         tools = self.mcp.prompt_section()
         if tools:
             system += "\n\n" + tools
-        return [{"role": "system", "content": system}] + hist + \
-               [{"role": "user", "content": user}]
+        message = {"role": "user", "content": user}
+        if self.images:
+            message["images"] = list(self.images)
+        return [{"role": "system", "content": system}] + hist + [message]
+
+    def can_see_images(self) -> bool:
+        caps = getattr(self.client, "capabilities", None)
+        return bool(caps) and "vision" in caps(self.agent.model)
+
+    def attach(self, prompt: str) -> str:
+        """Turn dragged-and-dropped paths into [Image #n] / [File #n] / @file and queue their content."""
+        prompt = self.attachments.convert(prompt)
+        out = ui.err_console if self.print_mode else console
+        for a in self.attachments.used(prompt):
+            if a.image:
+                if not self.can_see_images():
+                    out.print(f"  [warn]⚠ {escape(a.label)} {escape(a.path.name)}: {self.agent.model} cannot see "
+                              f"images[/] [muted](only its file path is sent; for a model that reads images: "
+                              f"[bc]ollama pull {attach_mod.VISION_HINT}[/] then [bc]/model "
+                              f"{attach_mod.VISION_HINT}[/])[/]")
+                    self.notes.append(f"The user attached the image {a.label}: {a.path} "
+                                      "(you cannot see it; you can use its path in code).")
+                    continue
+                try:
+                    self.images.append(attach_mod.encode_image(a.path))
+                except (OSError, ValueError) as e:
+                    out.print(f"  [err]✗ {escape(a.label)} could not be attached: {escape(str(e))}[/]")
+                    continue
+                self.notes.append(f"{a.label} is the image {a.path} (attached to this message).")
+            else:
+                self.notes.append(attach_mod.file_note(a))
+            out.print(f"  [muted]⎿  Attached[/] [bc]{escape(a.label)}[/] [muted]{escape(str(a.path))}[/]")
+        return prompt
 
     def options(self) -> dict:
         opts = {"temperature": self.agent.temperature, "num_ctx": int(self.cfg.get("num_ctx", 8192)),
@@ -258,7 +291,10 @@ class Session:
             self.log("blocked", f"exam mode: request not sent to the model: {prompt[:200]}")
             return
         self.start_mcp()
-        text, interrupted = self.generate(self.build_messages(prompt))
+        try:
+            text, interrupted = self.generate(self.build_messages(prompt))
+        finally:
+            self.images.clear()
         self.history += [{"role": "user", "content": prompt}, {"role": "assistant", "content": text}]
         self.log("prompt" if not (repair or tool_rounds) else "follow-up", prompt)
         self.log("answer", text, model=self.agent.model)

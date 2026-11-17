@@ -220,6 +220,7 @@ read data.csv with pandas and plot the average score per week, save the plot as 
 |----------|--------------|
 | any text | a request for the agent (or a [built-in action](#plain-language-actions), e.g. *commit and push*) |
 | `@file.py` or `@folder/` | includes that file (or all files of a folder) in the context; **Tab** completes names |
+| drag & drop a file or image | drop it on the terminal window, like Claude Code: images show as `[Image #1]` (seen by vision models such as `qwen2.5vl:3b`), files outside the project as `[File #2: notes.txt]` (their text is sent), project files as `@file.py` |
 | `!command` | runs a shell command, e.g. `!ls` or `!python temps.py`; the output is shared with the agent |
 | `/command` | a bcagent command, e.g. `/help` (see [all commands](#all-commands-with-examples)) |
 | `?` | quick help |

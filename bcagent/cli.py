@@ -12,7 +12,7 @@ from rich.markup import escape
 from rich.progress import BarColumn, DownloadColumn, Progress, TextColumn, TransferSpeedColumn
 from rich.table import Table
 
-from . import __version__, actions as actions_mod, helptext, agents as agents_mod, course as course_mod, hardware as hardware_mod, colab as colab_mod, git as git_mod, packages as packages_mod, report as report_mod, mcp as mcp_mod, ui, update as update_mod
+from . import __version__, actions as actions_mod, attachments as attach_mod, helptext, agents as agents_mod, course as course_mod, hardware as hardware_mod, colab as colab_mod, git as git_mod, packages as packages_mod, report as report_mod, mcp as mcp_mod, ui, update as update_mod
 from .agents import CATALOG, Agent, all_agents
 from .config import AGENTS_DIR, CONFIG_FILE, HISTORY_FILE, load_config, save_config
 from .llm import Ollama, OllamaError
@@ -540,6 +540,7 @@ def make_prompt(session: Session):
     from prompt_toolkit.formatted_text import HTML
     from prompt_toolkit.history import FileHistory
     from prompt_toolkit.key_binding import KeyBindings
+    from prompt_toolkit.keys import Keys
     from prompt_toolkit.styles import Style
 
     class BCCompleter(Completer):
@@ -572,6 +573,12 @@ def make_prompt(session: Session):
     @kb.add("escape", "enter")
     def _(event):
         event.current_buffer.insert_text("\n")
+
+    @kb.add(Keys.BracketedPaste)
+    def _(event):
+        # a file dragged onto the terminal arrives as a paste of its path: show it as [Image #1] etc.
+        data = event.data.replace("\r\n", "\n").replace("\r", "\n")
+        event.current_buffer.insert_text(session.attachments.convert(data))
 
     def toolbar():
         left = ("<b><style fg='ansigreen'>⏵⏵ accept edits on</style></b> (shift+tab to toggle)"
@@ -842,6 +849,7 @@ def resume(session: Session, pick: bool) -> bool:
 
 def run_request(line: str, session: Session, client: Ollama, cfg: dict) -> None:
     """A typed request: built-in actions (commit, push, tests, colab…) or a task for the agent."""
+    line = session.attach(line)   # files and images dragged onto the terminal
     plan = actions_mod.route(line)
     if not plan.commands:
         return session.turn(line)
@@ -895,7 +903,7 @@ def repl(session: Session, client: Ollama, cfg: dict, first: Optional[str]) -> N
         try:
             if line == "?":
                 helptext.show()
-            elif line.startswith("/"):
+            elif line.startswith("/") and not attach_mod.starts_with_path(line):
                 if not handle_slash(line, session, client, cfg):
                     break
             elif line.startswith("!"):

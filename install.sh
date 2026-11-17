@@ -81,7 +81,7 @@ EOF
 
 uninstall() {
   say "Removing bcagent"
-  rm -f "$BIN_DIR/bcagent"
+  rm -f "$BIN_DIR/bcagent" "$BIN_DIR/bcagents"
   rm -rf "$BCAGENT_HOME/venv"
   ok "bcagent removed (config and agents kept in $BCAGENT_HOME; delete that folder to remove everything)"
   ok "Ollama and models were not touched. Remove a model with: ollama rm $MODEL"
@@ -106,7 +106,7 @@ MSG
   local sudo="$SUDO"
 
   say "Removing bcagent"
-  rm -f "$BIN_DIR/bcagent"
+  rm -f "$BIN_DIR/bcagent" "$BIN_DIR/bcagents"
   # an Ollama installed privately by bcagent (no-sudo install) lives in $BCAGENT_HOME/ollama
   if [ -L "$BIN_DIR/ollama" ] && readlink "$BIN_DIR/ollama" | grep -q "$BCAGENT_HOME"; then rm -f "$BIN_DIR/ollama"; fi
   rm -rf "$BCAGENT_HOME"
@@ -332,6 +332,7 @@ else
 fi
 mkdir -p "$BIN_DIR"
 ln -sf "$BCAGENT_HOME/venv/bin/bcagent" "$BIN_DIR/bcagent"
+ln -sf "$BCAGENT_HOME/venv/bin/bcagent" "$BIN_DIR/bcagents"   # common typo: works too
 ok "bcagent $("$BCAGENT_HOME/venv/bin/bcagent" --version | awk '{print $2}') installed → $BIN_DIR/bcagent"
 
 # add ~/.local/bin to PATH if needed

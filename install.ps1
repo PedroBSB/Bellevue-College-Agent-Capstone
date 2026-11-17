@@ -229,6 +229,7 @@ if ($LASTEXITCODE -ne 0) { Die "pip install failed" }
 New-Item -ItemType Directory -Force -Path $BinDir | Out-Null
 $shim = "@echo off`r`n`"$BcHome\venv\Scripts\bcagent.exe`" %*`r`n"
 Set-Content -Path (Join-Path $BinDir "bcagent.cmd") -Value $shim -Encoding ASCII
+Set-Content -Path (Join-Path $BinDir "bcagents.cmd") -Value $shim -Encoding ASCII   # common typo: works too
 $userPath = [Environment]::GetEnvironmentVariable("Path", "User")
 if (-not $userPath) { $userPath = "" }
 if (($userPath -split ";") -notcontains $BinDir) {

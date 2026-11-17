@@ -32,6 +32,7 @@ GROUPS: List[Tuple[str, List[Tuple[str, str]]]] = [
     ]),
     ("Files and running code", [
         ("@file / @folder/", "include files in the request"),
+        ("drag & drop", "drop files or images on the terminal: [Image #1], [File #2: …]"),
         ("!command", "run a shell command, e.g. !python app.py (the output is shared with the agent)"),
         ("/run [file.py] [args]", "run a Python file (default: the last one bcagent wrote)"),
         ("/test [pytest args]", "run the tests; offers to fix failures in your code and runs them again"),
