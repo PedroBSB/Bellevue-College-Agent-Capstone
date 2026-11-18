@@ -41,9 +41,12 @@ def cells(ansi: str):
 
 
 def app_badge(system: str) -> str:
-    """The badge as bcagent prints it (in a new process: rich caches each style's codes for one color system)."""
+    """The badge as bcagent prints it in a color terminal (in a new process: rich caches each style's codes
+    for one color system). legacy_windows=False: the installer only draws the badge where escape codes work,
+    and there rich keeps the rounded corners (on old Windows consoles it would use square ones)."""
     code = ("import io, sys; from rich.console import Console; from bcagent import ui; b = io.StringIO(); "
-            f"Console(file=b, force_terminal=True, color_system={system!r}, width=120).print(ui.bulldog_badge()); "
+            f"Console(file=b, force_terminal=True, legacy_windows=False, color_system={system!r}, width=120)"
+            ".print(ui.bulldog_badge()); "
             "sys.stdout.buffer.write(b.getvalue().encode('utf-8'))")
     return subprocess.run([sys.executable, "-c", code], capture_output=True, check=True, cwd=ROOT).stdout.decode("utf-8")
 
