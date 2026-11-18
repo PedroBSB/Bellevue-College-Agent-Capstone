@@ -226,3 +226,23 @@ def test_pip_and_git_skip_the_scan():
     assert makes_files("python isoflop.py") and makes_files("python3 -m mymod")
     assert not makes_files("pip install x") and not makes_files("python -m pip install x")
     assert not makes_files("git status")
+
+
+def test_skipped_file_is_not_offered_to_run(make_session, monkeypatch):
+    s = make_session("FILE: loop.py\n```python\nfor i in range(3):\n    print(i)\n```\n"
+                     "Run it:\n```bash\npython loop.py\n```\n", auto=False)
+    s.print_mode = False
+    monkeypatch.setattr(ui, "is_interactive", lambda: True)
+    asked = []
+    monkeypatch.setattr(ui, "ask", lambda q, o: asked.append(q) or (2 if "create" in q else 0, None))
+    s.turn("write loop.py that prints 0 to 2")
+    assert not (s.project.root / "loop.py").exists()
+    assert len(asked) == 1 and "create loop.py" in asked[0], "no 'Run this command?' for a file never written"
+
+
+def test_uses_any():
+    from bcagent.session import uses_any
+    assert uses_any("python loop.py", {"loop.py"}) and uses_any("python src/loop.py", {"src/loop.py"})
+    assert uses_any("python3 ./loop.py --n 3", {"loop.py"})
+    assert not uses_any("python myloop.py", {"loop.py"}) and not uses_any("python data.py", {"a.py"})
+    assert not uses_any("pip install numpy", {"loop.py"})

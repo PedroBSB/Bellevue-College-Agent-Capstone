@@ -81,6 +81,7 @@ class Session:
         if self.course and self.course.learn_mode != "off":
             self.learn = True
         self.no_edits = False                   # one turn without edits (/review)
+        self.skipped: set = set()               # files the user said No to in the last review()
         self.last_error = None                  # (exception, input) of the last internal error, for /bug
         self.protect_tests = False              # while fixing failing tests: don't let the model edit tests
         self.events: List[dict] = []            # session log for /export
@@ -341,7 +342,13 @@ class Session:
                 fix = ("Your previous answer has problems:\n" + "\n".join(problems) +
                        "\nFix them. Write the COMPLETE corrected file(s) using `FILE: path` and a code block.")
                 return self.turn(fix, repair + 1)
-        self.offer_commands(commands + self.run_suggestions(applied, commands, problems))
+        cmds = commands + self.run_suggestions(applied, commands, problems)
+        # e.g. "python loop.py" after answering No to creating loop.py: it could only fail (Errno 2)
+        dropped = [c for c in cmds if uses_any(c, self.skipped)]
+        if dropped:
+            console.print(f"  [muted]⎿  Not offering to run {escape(', '.join(dropped))} – "
+                          f"{escape(', '.join(sorted(self.skipped)))} wasn't written.[/]")
+        self.offer_commands([c for c in cmds if c not in dropped])
 
     def fix_imports(self, paths: List[str]) -> None:
         """Add imports the model forgot (json, datetime, pd, np, ...) to the Python files it wrote."""
@@ -532,6 +539,7 @@ class Session:
         applied: List[str] = []
         batch: List[Tuple[str, Optional[str]]] = []
         feedback = None
+        self.skipped = set()
         for e in edits:
             if e.error:
                 continue
@@ -552,6 +560,7 @@ class Session:
                     self.auto = True
                 elif c == 2:
                     console.print(f"  [muted]⎿  Skipped {e.path}[/]")
+                    self.skipped.add(e.path)
                     continue
             before = raw_text(self.project, e.path)
             write_edit(self.project, e)
@@ -890,6 +899,15 @@ def is_test_file(path: str) -> bool:
     name = Path(path).name
     return name.startswith("test_") or name.endswith("_test.py") or name == "conftest.py" or \
         "tests/" in path.replace("\\", "/")
+
+
+def uses_any(command: str, paths) -> bool:
+    """True if the command mentions one of the files (by path or by name), e.g. "python src/loop.py"."""
+    for path in paths:
+        for name in {path, Path(path).name}:
+            if re.search(r"(?<![\w.-])" + re.escape(name) + r"(?![\w.-])", command):
+                return True
+    return False
 
 
 def is_runnable_script(path: Path) -> bool:

@@ -164,6 +164,25 @@ def logo_text() -> Text:
 
 
 
+def installer_logo() -> Tuple[str, str, List[str]]:
+    """The Bulldog badge as data for the installers, which run before Python and rich are there.
+
+    Returns (blue, palette, rows): colors are "r;g;b:n" (truecolor and the 256-color number rich would use),
+    the palette is space-separated, and each row is one pixel row with two digits per pixel (a palette
+    index, ".." = transparent). scripts/installer_logo.py writes this into install.sh and install.ps1."""
+    from rich.color import Color, ColorSystem
+
+    def entry(hex_color: str) -> str:
+        c = Color.parse(hex_color)
+        r, g, b = c.triplet
+        return f"{r};{g};{b}:{c.downgrade(ColorSystem.EIGHT_BIT).number}"
+
+    px = logo_pixels()
+    palette: List[str] = list(dict.fromkeys(c for row in px for c in row if c))
+    rows = ["".join(f"{palette.index(c):02d}" if c else ".." for c in row) for row in px]
+    return entry(BC_BLUE_LIGHT), " ".join(entry(c) for c in palette), rows
+
+
 TIPS = [
     "Ask for code: [bc]write a script that converts csv to json[/]",
     "Mention files with [bc]@file.py[/] to give bcagent context",
