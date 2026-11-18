@@ -71,7 +71,7 @@ def maybe_suggest(session, cfg: dict, client) -> None:
     """At start-up: if this computer can run a better agent than the default one, offer it (once)."""
     from . import ui
     from .agents import all_agents
-    from .config import save_config
+    from .config import update_config
     if session.print_mode or not ui.is_interactive() or session.agent.name != "bulldog":
         return
     asked = cfg.get("recommend_asked", 0)
@@ -88,12 +88,13 @@ def maybe_suggest(session, cfg: dict, client) -> None:
     c = ui.choose(f"This computer has {ram:.0f} GB of RAM, enough for [bc]{name}[/], which writes better code than "
                   f"the default bulldog. {what}",
                   [f"Yes, use {name}", "Not now", "No, don't ask again"], cancel=1)
-    cfg["recommend_asked"] = True if c != 1 else time.time()
+    changes = {"recommend_asked": True if c != 1 else time.time()}
     if c == 0:
         from .cli import install_agent, ensure_model
         agent = have if have and ensure_model(client, have.model) else install_agent(client, name)
         if agent:
-            cfg["agent"] = name
+            changes["agent"] = name
             session.agent = agent
             console.print(f"[ok]✓[/] now using [bc]{name}[/]. Switch back any time with [bc]/agent bulldog[/].")
-    save_config(cfg)
+    # install_agent() saved the new agent to config.json: reload before saving, or it would be lost
+    update_config(cfg, **changes)

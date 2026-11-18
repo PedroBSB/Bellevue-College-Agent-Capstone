@@ -225,6 +225,10 @@ if ((Test-Path (Join-Path $ScriptDir "pyproject.toml")) -and (Test-Path (Join-Pa
   & $VPy -m pip install --quiet --upgrade $RepoZip
 }
 if ($LASTEXITCODE -ne 0) { Die "pip install failed" }
+# a settings file whose default agent no longer exists would stop bcagent at start-up: reset it to bulldog
+& $VPy -c "import sys; from bcagent.agents import repair_config; sys.exit(0 if repair_config() else 1)" 2>$null
+if ($LASTEXITCODE -eq 0) { Warn "your default agent was missing - reset it to bulldog" }
+$global:LASTEXITCODE = 0
 
 New-Item -ItemType Directory -Force -Path $BinDir | Out-Null
 $shim = "@echo off`r`n`"$BcHome\venv\Scripts\bcagent.exe`" %*`r`n"

@@ -14,7 +14,7 @@ from rich.table import Table
 
 from . import __version__, actions as actions_mod, attachments as attach_mod, helptext, agents as agents_mod, course as course_mod, hardware as hardware_mod, colab as colab_mod, git as git_mod, packages as packages_mod, report as report_mod, mcp as mcp_mod, ui, update as update_mod
 from .agents import CATALOG, Agent, all_agents
-from .config import AGENTS_DIR, CONFIG_FILE, HISTORY_FILE, load_config, save_config
+from .config import AGENTS_DIR, CONFIG_FILE, HISTORY_FILE, load_config, update_config
 from .llm import Ollama, OllamaError
 from .project import MEMORY_FILE, Project
 from .session import Session, run_command
@@ -231,8 +231,7 @@ def agents_command(argv: List[str], client: Ollama, cfg: dict) -> int:
         if a.name not in all_agents(root):
             console.print(f"[err]✗ unknown agent {a.name}[/] – see [bc]bcagent agents list[/]")
             return 1
-        cfg["agent"] = a.name
-        save_config(cfg)
+        update_config(cfg, agent=a.name)
         console.print(f"[ok]✓[/] default agent is now [bc]{a.name}[/]")
     elif a.cmd == "create":
         path = agents_mod.create_template(a.name, a.model or agents_mod.DEFAULT_MODEL)
@@ -1010,6 +1009,13 @@ def main(argv: Optional[List[str]] = None) -> None:
         course = None
     if agent is None and course and course.allowed_agents and not course.agent_allowed(name):
         agent = agents.get("bulldog")  # replaced below by the course profile's agent
+    if agent is None and name in CATALOG:   # e.g. a settings file that lost its installed agents
+        console.print(f"[warn]agent '{name}' is not installed – installing it again[/]")
+        agent = install_agent(client, name)
+    if agent is None and not a.agent:   # a broken default must never stop bcagent from starting
+        console.print(f"[warn]⚠ agent '{name}' not found, using bulldog[/] [muted](see [bc]bcagent agents list[/])[/]")
+        agent = agents.get("bulldog")
+        update_config(cfg, agent="bulldog")
     if agent is None:
         console.print(f"[err]✗ unknown agent '{name}'[/] – see [bc]bcagent agents list[/]")
         sys.exit(1)

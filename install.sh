@@ -330,6 +330,9 @@ else
   fi
   "$VPY" -m pip install --quiet --upgrade "$REPO_ZIP"
 fi
+# a settings file whose default agent no longer exists would stop bcagent at start-up: reset it to bulldog
+"$VPY" -c "import sys; from bcagent.agents import repair_config; sys.exit(0 if repair_config() else 1)" 2>/dev/null \
+  && warn "your default agent was missing – reset it to bulldog" || true
 mkdir -p "$BIN_DIR"
 ln -sf "$BCAGENT_HOME/venv/bin/bcagent" "$BIN_DIR/bcagent"
 ln -sf "$BCAGENT_HOME/venv/bin/bcagent" "$BIN_DIR/bcagents"   # common typo: works too

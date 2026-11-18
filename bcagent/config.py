@@ -44,3 +44,17 @@ def load_config() -> dict:
 def save_config(cfg: dict) -> None:
     ensure_home()
     CONFIG_FILE.write_text(json.dumps(cfg, indent=2), encoding="utf-8")
+
+
+def update_config(cfg: dict = None, **changes) -> dict:
+    """Change some settings without overwriting the others.
+
+    Reloads config.json first, so settings saved meanwhile (e.g. an agent just installed by agents.install())
+    are kept. The in-memory `cfg` (if given) is refreshed to match what was saved."""
+    fresh = load_config()
+    fresh.update(changes)
+    save_config(fresh)
+    if cfg is not None:
+        cfg.clear()
+        cfg.update(fresh)
+    return fresh

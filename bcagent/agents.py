@@ -245,3 +245,14 @@ def create_template(name: str, model: str = DEFAULT_MODEL) -> Path:
     if not path.exists():
         path.write_text(TEMPLATE.format(name=slug(name), model=model), encoding="utf-8")
     return path
+
+
+def repair_config() -> bool:
+    """Reset the default agent to bulldog if config.json names an agent that no longer exists.
+
+    Run by the installers, so re-installing fixes a broken settings file. True if something was changed."""
+    from .config import update_config
+    if load_config().get("agent", "bulldog") in all_agents():
+        return False
+    update_config(agent="bulldog")
+    return True
