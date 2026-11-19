@@ -86,7 +86,13 @@ class Project:
                     continue
                 if f.endswith((".pyc", ".pyo")):
                     continue
-                out.append(self.rel(Path(dirpath) / f))
+                try:
+                    rel = self.rel(Path(dirpath) / f)
+                except (ValueError, OSError, RuntimeError):
+                    # a symlink that points outside the project (e.g. ~/bin/claude -> Homebrew when
+                    # the project folder is the home folder) or a symlink loop: not a project file
+                    continue
+                out.append(rel)
                 if len(out) >= limit:
                     return out
         return out
